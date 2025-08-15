@@ -1,0 +1,16 @@
+{
+  "name": "brainbot",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "echo Run per app: pnpm --filter @brainbot/bot dev | pnpm --filter @brainbot/web dev",
+    "lint": "echo skipped"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

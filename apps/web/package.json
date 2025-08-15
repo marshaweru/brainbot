@@ -1,0 +1,21 @@
+{
+  "name": "@brainbot/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 4321",
+    "build": "next build",
+    "start": "next start -p 4321"
+  },
+  "dependencies": {
+    "autoprefixer": "10.4.19",
+    "next": "14.2.4",
+    "postcss": "8.4.39",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwindcss": "3.4.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.10"
+  }
+}
