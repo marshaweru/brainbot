@@ -1,16 +1,22 @@
 {
-  "name": "brainbot",
-  "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "name": "@brainbot/bot",
   "scripts": {
-    "build": "pnpm -r run build",
-    "dev": "echo Run per app: pnpm --filter @brainbot/bot dev | pnpm --filter @brainbot/web dev",
-    "lint": "echo skipped"
+    "build": "pnpm exec tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
   },
-  "engines": {
-    "node": ">=18"
+  "dependencies": {
+    "@brainbot/shared": "workspace:*",
+    "telegraf": "^4.16.3",
+    "express": "^4.19.2",
+    "mongodb": "^6.8.0",
+    "openai": "^4.53.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/node": "^20.19.11",
+    "@types/express": "^4.17.21",
+    "ts-node-dev": "^2.0.0"
   }
 }

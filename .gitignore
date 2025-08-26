@@ -10,3 +10,5 @@ apps/*/.env.*
 *.log
 .DS_Store
 pnpm-debug.log*
+tmp_pdfs/
+

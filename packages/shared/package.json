@@ -1,9 +1,21 @@
 {
   "name": "@brainbot/shared",
   "version": "0.0.1",
+  "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.tsbuild.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.11",
+    "typescript": "^5.9.2"
   }
 }
