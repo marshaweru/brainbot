@@ -3,19 +3,26 @@
 const fs = require("fs");
 const path = require("path");
 
-const from = path.join(__dirname, "..", "src", "pdf_worker");
-const to = path.join(__dirname, "..", "dist", "pdf_worker");
+const FROM = path.join(__dirname, "..", "src", "pdf_worker");
+const TO   = path.join(__dirname, "..", "dist", "pdf_worker");
 
 function copyDir(src, dest) {
-  if (!fs.existsSync(src)) return;
+  if (!fs.existsSync(src)) return 0;
   fs.mkdirSync(dest, { recursive: true });
+  let count = 0;
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const s = path.join(src, entry.name);
     const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(s, d);
-    else fs.copyFileSync(s, d);
+    if (entry.isDirectory()) {
+      count += copyDir(s, d);
+    } else {
+      fs.copyFileSync(s, d);
+      count++;
+    }
   }
+  return count;
 }
 
-copyDir(from, to);
-console.log(`📎 Copied pdf_worker → ${to}`);
+const copied = copyDir(FROM, TO);
+console.log(`📎 Copied pdf_worker → ${TO} (${copied} file${copied === 1 ? "" : "s"})`);
+

@@ -1,21 +1,18 @@
-{
+﻿{
   "name": "@brainbot/shared",
   "version": "0.0.1",
+  "private": true,
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.tsbuild.json"
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"try{require('fs').rmSync('dist',{recursive:true,force:true})}catch{}\""
   },
   "devDependencies": {
-    "@types/node": "^20.19.11",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "@types/node": "^20.19.11"
   }
 }

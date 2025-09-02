@@ -17,10 +17,10 @@ const body = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "BrainBot — KCSE Study Assistant",
+  title: "BrainBot — Study Assistant",
   description: "KCSE-only sessions: notes, quizzes, assignments, red-pen feedback.",
   openGraph: {
-    title: "BrainBot — KCSE Study Assistant",
+    title: "BrainBot — Study Assistant",
     description: "KCSE-only sessions: notes, quizzes, assignments, red-pen feedback.",
     url: "https://yourdomain.xyz",
     siteName: "BrainBot",
@@ -29,8 +29,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "BrainBot — KCSE Study Assistant",
-    description: "KCSE-only sessions with examiner-grade marking.",
+    title: "BrainBot — Study Assistant",
+    description: "KCSE-only sessions with professional-grade marking.",
     images: ["/og.png"],
   },
 };

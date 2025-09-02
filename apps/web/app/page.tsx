@@ -29,8 +29,8 @@ export default function Home() {
           </h1>
 
           <p className="mt-4 text-gray-300">
-            KCSE isn’t just grades — it’s the gateway to university, scholarships, life-changing opportunities,
-            and career freedom. Only 3 more KCSE sittings in 2025, 2026 and 2027 before the system changes —
+            KCSE isn’t just grades — it’s a route to university, scholarships, life-changing opportunities,
+            and career freedom. Only 3 more KCSE sittings each in 2025, 2026 and 2027 before the system changes —
             the pressure is real, <span className="text-white/90 font-medium">but so is your opportunity</span>.
             Train smart now, <span className="text-white/90 font-medium">before it’s too late.</span>
           </p>
@@ -40,7 +40,7 @@ export default function Home() {
               href={tg("free")}
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-300 text-black font-semibold hover:from-emerald-300 hover:to-cyan-200 transition animate-pulse-once"
             >
-              🚀 Start Free 5-Hour Session
+              🚀 Start Free 2 Subjects Session
             </a>
             <Link
               href="/pricing"
@@ -62,7 +62,7 @@ export default function Home() {
             >Share on Telegram</a>
           </div>
           <p className="mt-2 text-xs text-gray-400">
-            Free starter: 5h total • 2 subjects/day. Upgrade any time in Telegram.
+            Free starter: 2 sessions • 2 subjects. Upgrade any time in Telegram.
           </p>
         </div>
 

@@ -1,20 +1,20 @@
-// apps/bot/src/commands/smartStart.ts
-import { Telegraf, Context, Markup } from "telegraf";
-import { getCollections } from "../lib/db";
+import { Telegraf, Markup } from "telegraf";
+import type { Context } from "telegraf";
+import { getCollections } from "../lib/db.js";
 import {
   SUBJECTS,
   CORE_LABELS,
   slugByLabel,
   labelBySlug,
-} from "../data/subjectsCatalog";
-import {
-  getUserTier,
-  PLAN_LIMITS,
-  getTotalSubjectsUsed,
-} from "../lib/plan";
+  type SubjectSlug,
+  type SubjectLabel,
+} from "../data/subjectsCatalog.js";
+import { getUserTier, PLAN_LIMITS } from "../lib/plan.js";
+import * as PlanLib from "../lib/plan.js";
+import { ensureUserExists } from "../utils/ensureUser.js";
 
 /* ---------- helpers ---------- */
-function pickDefaultLang(code?: string | null): "eng" | "kis" {
+function pickDefaultLang(code?: string | null): Extract<SubjectSlug, "eng" | "kis"> {
   const c = (code || "").toLowerCase();
   return c.startsWith("sw") ? "kis" : "eng";
 }
@@ -29,76 +29,91 @@ async function readProfile(ctx: Context) {
   return { telegramId, u };
 }
 
-async function setFocus(telegramId: string, slug: string) {
+async function setFocus(telegramId: string, slug: SubjectSlug) {
   const { users } = await getCollections();
+  await ensureUserExists(telegramId);
   await users.updateOne(
-    { telegramId },
-    { $set: { "profile.focusSubject": slug, updatedAt: new Date() } },
-    { upsert: true }
-  );
+  { telegramId },
+  {
+    $set: {
+      "profile.focusSubject": slug,
+      updatedAt: new Date(),          // <— merged here
+    },
+    $setOnInsert: { createdAt: new Date() },
+  },
+  { upsert: true }
+);
 }
 
-/**
- * Smart recommendation:
- * - FREE tier (2-session trial):
- *    1) First = Mathematics
- *    2) Second = English or Kiswahili (based on Telegram language)
- * - PAID tiers: rotate fairly across chosen subjects (prefer core)
- */
-async function pickRecommended(ctx: Context): Promise<{ slug: string; label: string }> {
+
+function nonNull<T>(x: T | null | undefined): x is T { return x !== null && x !== undefined; }
+function isSubjectLabel(s: string): s is SubjectLabel { return slugByLabel.has(s as unknown as SubjectLabel); }
+
+async function getTrialUsed(telegramId: string): Promise<number> {
+  const anyLib = PlanLib as Record<string, any>;
+  if (typeof anyLib.getTotalSessionsUsed === "function") {
+    return await anyLib.getTotalSessionsUsed(telegramId);
+  }
+  return 0;
+}
+
+/** Smart recommendation (free: Math → Eng/Kis; paid: rotate cores) */
+async function pickRecommended(ctx: Context): Promise<{ slug: SubjectSlug; label: string }> {
   try {
     const { telegramId, u } = await readProfile(ctx);
     const tier = await getUserTier(ctx);
 
-    // Free trial path — deterministic two-session flow
     if (tier === "free") {
-      const usedTotal = await getTotalSubjectsUsed(telegramId);
-      if (usedTotal <= 0) {
-        return { slug: "mat", label: labelBySlug.get("mat") || "Mathematics" };
-      }
+      const usedTotal = await getTrialUsed(telegramId);
+      if (usedTotal <= 0) return { slug: "mat", label: labelBySlug.get("mat") || "Mathematics" };
       if (usedTotal === 1) {
         const lang = pickDefaultLang((ctx.from as any)?.language_code);
         return { slug: lang, label: labelBySlug.get(lang) || (lang === "kis" ? "Kiswahili" : "English") };
       }
-      // After 2 sessions are done, just fall back to normal logic (or limits will block anyway)
     }
 
-    // Paid (or fallback) — rotate across chosen subjects, prefer core subjects
-    const chosen: string[] = Array.isArray(u?.profile?.subjects) ? u!.profile!.subjects : [];
-    if (!chosen.length) {
+    const chosenLabels: string[] = Array.isArray(u?.profile?.subjects) ? u!.profile!.subjects : [];
+    if (!chosenLabels.length) {
       const def = SUBJECTS.find(s => s.slug === "eng") ?? SUBJECTS[0];
-      return { slug: def.slug, label: def.label };
+      return { slug: def.slug as SubjectSlug, label: def.label };
     }
 
-    // Look at recent usage to rotate fairly
     const { usage } = await getCollections();
     const recent = await usage.find({ telegramId }).sort({ ts: -1 }).limit(200).toArray();
-    const lastSeen = new Map<string, number>();
-    for (const r of recent) {
+    const lastSeenByLabel = new Map<string, number>();
+    for (const r of recent as Array<{ subjectLabel?: string; ts?: Date }>) {
       const lab = r.subjectLabel as string | undefined;
-      if (lab && !lastSeen.has(lab)) lastSeen.set(lab, r.ts?.getTime?.() ?? 0);
+      if (lab && !lastSeenByLabel.has(lab)) lastSeenByLabel.set(lab, r.ts?.getTime?.() ?? 0);
     }
 
-    const inChosen = (lab: string) => chosen.includes(lab);
+    const inChosen = (lab: string) => chosenLabels.includes(lab);
 
-    // Prefer a core that hasn't been done recently; otherwise least-recent overall
-    const corePick =
-      CORE_LABELS.find((c) => inChosen(c) && !lastSeen.has(c)) ??
-      CORE_LABELS.filter(inChosen).sort((a, b) => (lastSeen.get(a) ?? 0) - (lastSeen.get(b) ?? 0))[0];
+    const corePickLabel =
+      CORE_LABELS.find((c: string) => inChosen(c) && !lastSeenByLabel.has(c)) ??
+      CORE_LABELS.filter(inChosen).sort((a: string, b: string) => (lastSeenByLabel.get(a) ?? 0) - (lastSeenByLabel.get(b) ?? 0))[0];
 
-    if (corePick) return { slug: slugByLabel.get(corePick)!, label: corePick };
+    if (corePickLabel && isSubjectLabel(corePickLabel)) {
+      const s = slugByLabel.get(corePickLabel as SubjectLabel);
+      if (nonNull(s)) return { slug: s as SubjectSlug, label: corePickLabel };
+    }
 
-    const anyPick =
-      [...chosen].sort((a, b) => (lastSeen.get(a) ?? 0) - (lastSeen.get(b) ?? 0))[0] ?? chosen[0];
+    const anyPickLabel =
+      [...chosenLabels].sort((a: string, b: string) => (lastSeenByLabel.get(a) ?? 0) - (lastSeenByLabel.get(b) ?? 0))[0] ?? chosenLabels[0];
 
-    return { slug: slugByLabel.get(anyPick)!, label: anyPick };
+    if (anyPickLabel && isSubjectLabel(anyPickLabel)) {
+      const anySlug = slugByLabel.get(anyPickLabel as SubjectLabel);
+      if (nonNull(anySlug)) return { slug: anySlug as SubjectSlug, label: anyPickLabel };
+    }
+
+    const def = SUBJECTS.find(s => s.slug === "eng") ?? SUBJECTS[0];
+    return { slug: def.slug as SubjectSlug, label: def.label };
   } catch {
     const def = SUBJECTS.find(s => s.slug === "eng") ?? SUBJECTS[0];
-    return { slug: def.slug, label: def.label };
+    return { slug: def.slug as SubjectSlug, label: def.label };
   }
 }
 
-function smartKb(slug?: string) {
+function smartKb(slug?: SubjectSlug) {
   return Markup.inlineKeyboard([
     [Markup.button.callback("⭐ Get Session", slug ? `DO_QUICK:${slug}` : "DO_QUICK")],
     [
@@ -129,47 +144,53 @@ export async function sendSmartStart(ctx: Context) {
 }
 
 /* ---------- wiring ---------- */
+type CtxFn = (c: Context) => Promise<any>;
+
 export function registerSmartStart(bot: Telegraf) {
-  // Get Session (no slug): pick recommended, set focus, then run study
+  // Get Session (no slug)
   bot.action("DO_QUICK", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const rec = await pickRecommended(ctx);
     const { telegramId } = await readProfile(ctx);
     await setFocus(telegramId, rec.slug);
     await ctx.deleteMessage().catch(() => {});
-    const { default: studyCmd } = await import("./study");
-    await studyCmd(ctx);
+    const { startStudyForSubject } = await import("./study.js");
+    await (startStudyForSubject as unknown as CtxFn)(ctx);
   });
 
   // Get Session with explicit slug
   bot.action(/^DO_QUICK:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const slug = String(ctx.match[1]);
+    const slug = String((ctx.match as any)[1]) as SubjectSlug;
     const { telegramId } = await readProfile(ctx);
     await setFocus(telegramId, slug);
     await ctx.deleteMessage().catch(() => {});
-    const { default: studyCmd } = await import("./study");
-    await studyCmd(ctx);
+    const { startStudyForSubject } = await import("./study.js");
+    await (startStudyForSubject as any)(ctx as any, slug);
   });
 
-  // Switch Subject → show quick list of picked subjects, plus picker
+  // Switch Subject
   bot.action("SWITCH_QUICK", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const { u } = await readProfile(ctx);
-    const chosen: string[] = Array.isArray(u?.profile?.subjects) ? u!.profile!.subjects : [];
+    const chosenLabels: string[] = Array.isArray(u?.profile?.subjects) ? u!.profile!.subjects : [];
 
-    if (!chosen.length) {
-      const { openSubjectPicker } = await import("./subjects");
-      return openSubjectPicker(ctx);
+    if (!chosenLabels.length) {
+      const subjMod = await import("./subjects.js");
+      return (subjMod.openSubjectPicker as unknown as CtxFn)(ctx);
     }
 
-    const slugs = chosen.map((lab) => slugByLabel.get(lab)).filter(Boolean) as string[];
+    const slugs: SubjectSlug[] = chosenLabels
+      .filter(isSubjectLabel)
+      .map((lab) => slugByLabel.get(lab as SubjectLabel))
+      .filter(nonNull) as SubjectSlug[];
+
     const take = slugs.slice(0, 9);
     const rows: any[] = [];
     for (let i = 0; i < take.length; i += 3) {
       rows.push(
-        take.slice(i, i + 3).map((sg) =>
-          Markup.button.callback(labelBySlug.get(sg)!, `START_SUBJ:${sg}`)
+        take.slice(i, i + 3).map((sg: SubjectSlug) =>
+          Markup.button.callback(labelBySlug.get(sg) || sg.toUpperCase(), `START_SUBJ:${sg}`)
         )
       );
     }
@@ -178,27 +199,22 @@ export function registerSmartStart(bot: Telegraf) {
     await ctx.reply("Pick a subject to start now:", Markup.inlineKeyboard(rows));
   });
 
-  // Open full subject picker
   bot.action("OPEN_PICKER", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const { openSubjectPicker } = await import("./subjects");
-    await openSubjectPicker(ctx);
+    const subjMod = await import("./subjects.js");
+    await (subjMod.openSubjectPicker as unknown as CtxFn)(ctx);
   });
 
-  // Start a specific subject immediately
   bot.action(/^START_SUBJ:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const slug = String(ctx.match[1]);
+    const slug = String((ctx.match as any)[1]) as SubjectSlug;
     const { telegramId } = await readProfile(ctx);
     await setFocus(telegramId, slug);
     await ctx.deleteMessage().catch(() => {});
-    const { default: studyCmd } = await import("./study");
-    await studyCmd(ctx);
+    const { startStudyForSubject } = await import("./study.js");
+    await (startStudyForSubject as any)(ctx as any, slug);
   });
 
-  // Lightweight daily plan:
-  // - Free: explain 2 total sessions and compulsory flow (Math + Eng/Kis)
-  // - Paid: show subjects/day (no minute talk) and suggest a rotation
   bot.action("OPEN_PLAN", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const tier = await getUserTier(ctx);
@@ -206,10 +222,9 @@ export function registerSmartStart(bot: Telegraf) {
     const subs: string[] = Array.isArray(u?.profile?.subjects) ? u!.profile!.subjects : [];
 
     if (tier === "free") {
-      const total = PLAN_LIMITS.free.trialTotalSubjects || 2;
-      const used = await getTotalSubjectsUsed(String(ctx.from?.id || ""));
+      const total = (PLAN_LIMITS.free as any).trialTotalSessions ?? 2;
+      const used = await getTrialUsed(String(ctx.from?.id || ""));
       const left = Math.max(0, total - used);
-
       const lines = [
         `📅 *Smart Plan* — Free Starter`,
         `• You have *${left}/${total}* trial sessions left.`,
@@ -217,11 +232,11 @@ export function registerSmartStart(bot: Telegraf) {
         ``,
         `Tap *Get Session* to continue.`,
       ];
-      const nextSlug = used === 0 ? "mat" : used === 1 ? pickDefaultLang((ctx.from as any)?.language_code) : "eng";
+      const nextSlug: SubjectSlug =
+        used === 0 ? "mat" : used === 1 ? pickDefaultLang((ctx.from as any)?.language_code) : "eng";
       return ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...smartKb(nextSlug) });
     }
 
-    // Paid plans: prioritize subjects/day; rotate chosen subjects
     const limits = PLAN_LIMITS[tier];
     const subjectsPerDay = limits.subjectsPerDay;
     const lines = [
@@ -231,16 +246,19 @@ export function registerSmartStart(bot: Telegraf) {
       ``,
       `Suggested rotation (today):`,
     ];
+
     const picks = subs.slice(0, subjectsPerDay || 1);
-    if (!picks.length) {
-      picks.push("English"); // fallback
-    }
+    if (!picks.length) picks.push("English");
+
     picks.forEach((s) => lines.push(`• ${s}`));
 
-    const firstSlug = slugByLabel.get(picks[0] ?? "") || "eng";
+    const firstLabel = picks[0] ?? "English";
+    const firstSlug = (isSubjectLabel(firstLabel) ? slugByLabel.get(firstLabel) : "eng") as SubjectSlug;
+
     await ctx.reply(lines.join("\n"), {
       parse_mode: "Markdown",
       ...smartKb(firstSlug),
     });
   });
 }
+

@@ -1,94 +1,90 @@
 // apps/bot/src/lib/markingInbox.ts
-import { Context } from "telegraf";
-import { getCollections } from "./db";
-import type { Collection } from "mongodb";
+import type { Collection, WithId } from "mongodb";
+import { getCollections } from "../lib/db.js";
 
-export type PendingItem = {
+/* ---------- Types ---------- */
+
+export type InboxItem = {
   kind: "photo" | "image" | "pdf";
   fileId: string;
   mime?: string;
   addedAt: Date;
 };
 
-export type InboxStatus = "collecting" | "ready" | "processing" | "done";
-
-type InboxDoc = {
+export type InboxDoc = {
   telegramId: string;
   chatId: number;
-  status: InboxStatus;
-  items: PendingItem[];
-  createdAt: Date;
-  updatedAt: Date;
+  items: InboxItem[];
+  status?: "open" | "done";
+  createdAt?: Date;
+  updatedAt?: Date;
 };
 
-function inboxColl(): Promise<Collection<InboxDoc>> {
-  // Cast your untyped collection to our shape
-  return getCollections().then(
-    (c) => c.markingInbox as unknown as Collection<InboxDoc>
-  );
-}
+/* ---------- Internals ---------- */
 
-function idsFrom(ctx: Context) {
-  const telegramId = String(ctx.from?.id || "");
-  const chatId = Number(ctx.chat?.id || 0);
+function keyFromCtx(ctx: any) {
+  const telegramId = String(ctx?.from?.id ?? "");
+  const chatId = Number(ctx?.chat?.id ?? 0);
+  if (!telegramId || !chatId) throw new Error("markingInbox: missing telegramId/chatId");
   return { telegramId, chatId };
 }
 
-/** Push one pending item; returns the updated queued count. */
-export async function pushPending(ctx: Context, item: PendingItem) {
-  const { telegramId, chatId } = idsFrom(ctx);
-  if (!telegramId || !chatId) return 0;
+async function coll(): Promise<Collection<InboxDoc>> {
+  const { markingInbox } = await getCollections();
+  return markingInbox as unknown as Collection<InboxDoc>;
+}
 
-  const coll = await inboxColl();
-  const filter = { telegramId, chatId, status: { $in: ["collecting", "ready"] as InboxStatus[] } };
-
-  // upsert + push (no need to read ModifyResult types)
-  await coll.updateOne(
-    filter,
+async function ensureOpenDoc(c: Collection<InboxDoc>, telegramId: string, chatId: number) {
+  await c.updateOne(
+    { telegramId, chatId, status: { $ne: "done" } },
     {
       $setOnInsert: {
         telegramId,
         chatId,
-        status: "collecting" as InboxStatus,
-        items: [] as PendingItem[],
+        items: [] as InboxItem[],
+        status: "open" as const,
         createdAt: new Date(),
       },
-      $set: { updatedAt: new Date(), status: "collecting" as InboxStatus },
-      $push: { items: item },
+      $set: { updatedAt: new Date() },
     },
     { upsert: true }
   );
+}
 
-  // fetch latest to get count
-  const doc = await coll.findOne(filter, { projection: { items: 1 } });
+/* ---------- Public API ---------- */
+
+/** Queue a new item and return the new queue length. */
+export async function pushPending(ctx: any, item: InboxItem): Promise<number> {
+  const { telegramId, chatId } = keyFromCtx(ctx);
+  const c = await coll();
+
+  await ensureOpenDoc(c, telegramId, chatId);
+
+  await c.updateOne(
+    { telegramId, chatId, status: { $ne: "done" } },
+    { $push: { items: item }, $set: { updatedAt: new Date() } }
+  );
+
+  const doc: WithId<InboxDoc> | null = await c.findOne({ telegramId, chatId, status: { $ne: "done" } });
   return doc?.items?.length ?? 0;
 }
 
-export async function listPending(ctx: Context): Promise<PendingItem[]> {
-  const { telegramId, chatId } = idsFrom(ctx);
-  if (!telegramId || !chatId) return [];
-  const coll = await inboxColl();
-  const doc = await coll.findOne(
-    { telegramId, chatId, status: { $in: ["collecting", "ready"] as InboxStatus[] } },
-    { projection: { items: 1 } }
-  );
+/** Get the current queue (creates an empty open doc if none). */
+export async function listPending(ctx: any): Promise<InboxItem[]> {
+  const { telegramId, chatId } = keyFromCtx(ctx);
+  const c = await coll();
+
+  await ensureOpenDoc(c, telegramId, chatId);
+
+  const doc: WithId<InboxDoc> | null = await c.findOne({ telegramId, chatId, status: { $ne: "done" } });
   return doc?.items ?? [];
 }
 
-export async function clearPending(ctx: Context) {
-  const { telegramId, chatId } = idsFrom(ctx);
-  if (!telegramId || !chatId) return;
-  const coll = await inboxColl();
-  await coll.deleteOne({ telegramId, chatId, status: { $in: ["collecting", "ready"] as InboxStatus[] } });
+/** Clear any open queue for this chat. */
+export async function clearPending(ctx: any): Promise<void> {
+  const { telegramId, chatId } = keyFromCtx(ctx);
+  const c = await coll();
+  await c.deleteMany({ telegramId, chatId, status: { $ne: "done" } });
 }
 
-export async function setStatus(ctx: Context, status: InboxStatus) {
-  const { telegramId, chatId } = idsFrom(ctx);
-  if (!telegramId || !chatId) return;
-  const coll = await inboxColl();
-  await coll.updateOne(
-    { telegramId, chatId },
-    { $set: { status, updatedAt: new Date() } },
-    { upsert: true }
-  );
-}
+

@@ -1,37 +1,48 @@
 // apps/bot/src/routes/mpesa/c2b-confirmation.ts
-import express, { Request, Response } from "express";
-import { getCollections, getUserSession } from "../../lib/db";
-import { Plans, addDays } from "@brainbot/shared";
-import { sendTelegramMessage } from "../../lib/telegram";
+import express, { type Request, type Response } from "express";
+import { getCollections, getUserSession } from "../../lib/db.js";
+import { Plans, planFromAmount } from "../../lib/plan.js";
+import { sendTelegramMessage } from "../../lib/telegram.js";
+       // ⬅️ .js
 
 export const router = express.Router();
+// …rest of file unchanged…
 
 type PlanCode = keyof typeof Plans;
-type PlanRec = (typeof Plans)[PlanCode];
-type SelectedPlan = { code: PlanCode } & PlanRec;
+type SelectedPlan = ReturnType<typeof planFromAmount> & { code: PlanCode };
+
+/** Add whole days to a date */
+function addDays(date: Date, days: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
 
 function normalizeAmount(a: any): number {
   // Accept: numbers, "2999", "2,999", "2999.00", "KES 2,999", etc.
   if (a == null) return NaN;
-  const s = String(a).replace(/[^0-9.]/g, ""); // strip currency, spaces, commas
+  const s = String(a).replace(/[^0-9.]/g, "");
   const n = Number(s);
   return Number.isNaN(n) ? NaN : Math.round(n);
 }
 
 function getPlanByAmount(amountKes: number): SelectedPlan | null {
-  const entry = (Object.entries(Plans) as [PlanCode, PlanRec][])
-    .find(([, p]) => p.amount === amountKes);
-  return entry ? ({ code: entry[0], ...entry[1] }) : null;
+  const p = planFromAmount(amountKes);
+  if (!p) return null;
+
+  // recover the code key (since Plans values include `code`, this cast is safe)
+  const code = p.code as PlanCode;
+  return { ...p, code };
 }
 
 router.post("/", async (req: Request, res: Response) => {
-  // Respond ASAP so Safaricom doesn’t retry
+  // Acknowledge immediately so Safaricom doesn't retry
   res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
 
   try {
     const body = req.body || {};
 
-    // Handle typical and lowercase variants defensively
+    // Defensive key reads (upper/lower variants included)
     const billRefNumber = String(
       body?.BillRefNumber ?? body?.billRefNumber ?? body?.AccountReference ?? ""
     ).trim();
@@ -47,67 +58,75 @@ router.post("/", async (req: Request, res: Response) => {
     const msisdn = String(body?.MSISDN ?? body?.msisdn ?? body?.Sender ?? body?.sender ?? "").trim();
     const firstName = String(body?.FirstName ?? body?.firstName ?? "");
     const lastName = String(body?.LastName ?? body?.lastName ?? "");
-    const adminId = process.env.TG_ADMIN_ID || "7959124324";
+    const adminId = process.env.TG_ADMIN_ID || process.env.ADMIN_TELEGRAM_ID || "";
 
-    // telemetry helpers (additive; safe)
-    const ip = req.headers["x-forwarded-for"]?.toString() || req.ip || "";
+    // Telemetry bits
+    const ip = (req.headers["x-forwarded-for"]?.toString() || req.ip || "").split(",")[0].trim();
     const userAgent = req.headers["user-agent"] || "";
 
-    // Notify admin (single compact message)
-    await sendTelegramMessage(
-      adminId,
-      [
-        `🚨 *C2B Payment*`,
-        "```json",
-        JSON.stringify(
-          { billRefNumber, amount, transID, msisdn, firstName, lastName, ip },
-          null,
-          2
-        ),
-        "```",
-      ].join("\n")
-    );
+    // Notify admin (compact, no MarkdownV2 escaping headaches)
+    if (adminId) {
+      await sendTelegramMessage(
+        adminId,
+        [
+          "🚨 C2B Payment",
+          `billRefNumber: ${billRefNumber}`,
+          `amount: ${amount}`,
+          `transID: ${transID}`,
+          `msisdn: ${msisdn}`,
+          `name: ${firstName} ${lastName}`,
+          `ip: ${ip}`,
+        ].join("\n")
+      );
+    }
 
     if (!billRefNumber || !amount || Number.isNaN(amount)) return;
 
     const { users, payments, settings } = await getCollections();
 
-    // idempotency
+    // Idempotency: skip if we’ve recorded this TransID already
     const existing = await payments.findOne({ transID });
     if (existing) return;
 
-    // match plan by exact amount
+    // Plan matching by exact amount
     let selected = getPlanByAmount(amount);
     if (!selected) {
       await payments.insertOne({
-        transID, billRefNumber, amount, matched: false, channel: "mpesa_c2b",
-        ts: new Date(), ip, userAgent, raw: body
+        transID,
+        billRefNumber,
+        amount,
+        matched: false,
+        channel: "mpesa_c2b",
+        ts: new Date(),
+        ip,
+        userAgent,
+        raw: body,
       });
       await sendTelegramMessage(
         billRefNumber,
-        `⚠️ Payment (KES ${amount}) didn’t match a BrainBot plan.`
+        `⚠️ Payment (KES ${amount}) didn’t match a BrainBot plan. Our team will review.`
       );
       return;
     }
 
-    // first-100 gating (safe on null)
-    if ((selected.code as string).toUpperCase() === "FIRST100") {
+    // Founder (first 100) gating
+    if (selected.code === "founder") {
       const gate = await settings.findOneAndUpdate(
-        { key: "first100-counter" },
+        { key: "founder-counter" },
         { $inc: { count: 1 } },
         { upsert: true, returnDocument: "after" }
       );
-      const count = (gate?.value?.count ?? 0) as number;
+      const count = Number(gate?.value?.count ?? 0);
       if (count > 100) {
         await sendTelegramMessage(
           billRefNumber,
-          `⏳ KES 1,499 founder deal sold out. Crediting **Plus (Month)** instead.`
+          `⏳ KES ${selected.amount} founder deal is sold out. Crediting *Serious Prep* instead.`
         );
-        selected = { code: "PLUS_MONTH" as PlanCode, ...Plans.PLUS_MONTH };
+        selected = { ...Plans.serious, code: "serious" };
       }
     }
 
-    // ensure user
+    // Ensure user record (we treat billRefNumber as Telegram ID)
     let user = await getUserSession(billRefNumber);
     if (!user) {
       await users.insertOne({
@@ -118,19 +137,19 @@ router.post("/", async (req: Request, res: Response) => {
         plan: null,
         daily: { date: null, minutesUsed: 0, subjectsDone: 0 },
         referral: { referrerId: null, paidReferrals: 0, hasPaid: false },
-        autoCreatedFromPayment: true
+        autoCreatedFromPayment: true,
       });
       user = await users.findOne({ telegramId: billRefNumber });
     }
     if (!user) return;
 
-    // compute expiry (extend if overlapping)
+    // Compute expiry (extend if overlapping)
     const now = new Date();
     const currentExpiry = user.plan?.expiresAt ? new Date(user.plan.expiresAt) : null;
     const base = currentExpiry && currentExpiry > now ? currentExpiry : now;
-    const expiresAt = addDays(base, selected.durationDays);
+    const expiresAt = addDays(base, selected.days);
 
-    // activate plan + reset daily counters
+    // Activate plan & reset today’s counters
     await users.updateOne(
       { telegramId: billRefNumber },
       {
@@ -141,19 +160,20 @@ router.post("/", async (req: Request, res: Response) => {
             code: selected.code,
             label: selected.label,
             amount: selected.amount,
-            hoursPerDay: selected.hoursPerDay,
+            hoursPerDay: selected.hrsPerDay,          // normalized field name stored on user
             subjectsPerDay: selected.subjectsPerDay,
-            expiresAt
+            expiresAt,
+            tier: selected.mapsToTier,                // so getUserTier() resolves immediately
           },
           "daily.date": new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(now),
           "daily.minutesUsed": 0,
-          "daily.subjectsDone": 0
-        }
+          "daily.subjectsDone": 0,
+        },
       },
       { upsert: true }
     );
 
-    // record payment (additive snapshot for audits)
+    // Record payment audit snapshot
     await payments.insertOne({
       transID,
       billRefNumber,
@@ -161,36 +181,38 @@ router.post("/", async (req: Request, res: Response) => {
       matched: true,
       channel: "mpesa_c2b",
       planCode: selected.code,
-      hoursPerDay: selected.hoursPerDay,
+      hoursPerDay: selected.hrsPerDay,
       subjectsPerDay: selected.subjectsPerDay,
-      durationDays: selected.durationDays,
-      planSnapshot: { ...selected }, // snapshot at time of purchase
+      durationDays: selected.days,
+      planSnapshot: { ...selected },
       msisdn,
       firstName,
       lastName,
       ip,
       userAgent,
       ts: new Date(),
-      raw: body
+      raw: body,
     });
 
-    // notify user
+    // Tell the user
     await sendTelegramMessage(
       billRefNumber,
       [
-        `✅ *Payment Received – KES ${amount}*`,
+        `✅ *Payment Received – KES ${selected.amount}*`,
         `Plan: *${selected.label}*`,
         ``,
         `Today you can study:`,
-        `• ⏱️ *${selected.hoursPerDay} hours/day*`,
+        `• ⏱️ *${selected.hrsPerDay} hours/day*`,
         `• 📚 *${selected.subjectsPerDay} subjects/day*`,
         `• 🗓️ Expires: *${expiresAt.toDateString()}*`,
         ``,
-        `Start now: type */study*`
+        `Start now: type */study*`,
       ].join("\n")
     );
   } catch (err: any) {
-    const adminId = process.env.TG_ADMIN_ID || "7959124324";
-    await sendTelegramMessage(adminId, `🔥 ERROR inside C2B handler:\n${err?.message || err}`);
+    const adminId = process.env.TG_ADMIN_ID || process.env.ADMIN_TELEGRAM_ID || "";
+    if (adminId) {
+      await sendTelegramMessage(adminId, `🔥 ERROR inside C2B handler:\n${err?.message || err}`);
+    }
   }
 });

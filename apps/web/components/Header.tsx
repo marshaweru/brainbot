@@ -13,7 +13,7 @@ export default async function Header() {
       <Link href="/" aria-label="BrainBot home" className="group inline-flex items-baseline gap-2">
         <span className="text-lg font-semibold text-white">BrainBot</span>
         <span className="hidden sm:inline text-xs text-slate-400 group-hover:text-slate-300">
-          • your ultimate study buddy
+          • your ultimate productivity tool
         </span>
       </Link>
 

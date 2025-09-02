@@ -30,7 +30,7 @@ export default function Pricing() {
       start: "upgrade",
     },
     {
-      name: "Club 84",
+      name: "Premium",
       price: "KES 5,999",
       sub: "8h/day • 4 subjects/day • 30 days",
       blurb1: "KCSE-only, zero gaps.",
@@ -45,7 +45,7 @@ export default function Pricing() {
       <h1 className="text-center text-3xl md:text-4xl font-extrabold text-white">Choose a plan</h1>
       <p className="text-center text-gray-300 mt-2">
         KCSE-only notes, Smart-8 plans, mini-quizzes, and examiner-style feedback.
-        <span className="hidden sm:inline"> Pay via M-PESA — details are handled inside Telegram.</span>
+        <span className="hidden sm:inline"> Pay via M-PESA </span>
       </p>
 
       {/* Founder at top with glow */}

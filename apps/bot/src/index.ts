@@ -1,100 +1,129 @@
 // apps/bot/src/index.ts
 import "dotenv/config";
 import express from "express";
-import { Context } from "telegraf";
+import { Telegraf, Markup, type Context } from "telegraf";
 
-import { connectDB } from "./lib/db";
-import { router as mpesaRouter } from "./routes/mpesa/c2b-confirmation";
+import { connectDB } from "./lib/db.js";
+import { preflightModels, models } from "./lib/openai.js";
 
-import studyCmd from "./commands/study";
-import meCmd from "./commands/me";
-import { registerVoice } from "./voice";            // keep voice here (not in lib/telegram)
-import { bot, launchBot } from "./lib/telegram";    // bot is pre-wired with start/smartStart/subjects/studyActions/onboard/dev
+import { registerStudy } from "./commands/study.js";
+import { registerStudyActions } from "./commands/studyActions.js";
+import { registerDev } from "./commands/dev.js";
+import { registerVoice } from "./commands/voice.js"; // <- if your file is at src/voice.ts, change to "./voice.js"
 
-// PORT with sane fallback
-const PORT =
-  process.env.PORT && process.env.PORT.trim() !== ""
-    ? parseInt(process.env.PORT, 10)
-    : 8787;
+// ---------------------------------------------------------------------------
+// Env / constants
+// ---------------------------------------------------------------------------
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is not set");
 
-// Log every update (useful in dev)
-bot.use(async (ctx: Context, next) => {
-  console.log(
-    "▶ update:",
-    ctx.updateType,
-    "from",
-    ctx.from?.id,
-    ctx.from?.username || ctx.from?.first_name
-  );
-  return next();
-});
+const PORT = Number(process.env.PORT || process.env.BOT_PORT || 8787);
+const WEBHOOK_URL: string | null = process.env.BOT_WEBHOOK_URL
+  ? String(process.env.BOT_WEBHOOK_URL).trim()
+  : null;
 
-// Register only what's NOT wired in lib/telegram.ts
-registerVoice(bot);
-bot.command("study", studyCmd);
-bot.command("me", meCmd);
+// Telegraf options (keep untyped to avoid version/type drift)
+const tgOpts = { handlerTimeout: 90_000 } as const;
 
-// Central error trap
-bot.catch((err: unknown) => {
-  const msg = (err as any)?.message ?? String(err);
-  console.error("🤖 Bot error:", msg);
-});
-
-// ── Express ────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Health server
+// ---------------------------------------------------------------------------
 const app = express();
 
-// Behind proxy/CDN? Let req.ip reflect X-Forwarded-For
-app.set("trust proxy", 1);
-
-// Accept JSON + urlencoded (some gateways can send form bodies)
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true, limit: "2mb" }));
-
-app.get("/", (_req, res) => res.send("BrainBot API OK"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
 app.get("/health/db", async (_req, res) => {
   try {
     const db = await connectDB();
-    await db.command({ ping: 1 });
     res.json({ ok: true, db: db.databaseName });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
+
+let cachedMe:
+  | { id: number; is_bot: boolean; first_name: string; username?: string }
+  | null = null;
+
 app.get("/health/bot", async (_req, res) => {
   try {
-    const me = await bot.telegram.getMe();
-    res.json({ ok: true, bot: me.username });
+    if (!cachedMe) {
+      const tmp = new Telegraf(BOT_TOKEN, tgOpts);
+      cachedMe = (await tmp.telegram.getMe()) as any;
+    }
+    res.json({ ok: true, bot: cachedMe?.username || "(unknown)" });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
-// M-PESA webhook
-app.use("/api/mpesa/c2b/confirmation", mpesaRouter);
-
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`🌐 Express on http://localhost:${PORT}`);
-
-  try {
-    await connectDB();
-    console.log("🧠 DB ready at startup");
-  } catch (e: any) {
-    console.error("❌ DB connect failed at startup:", e?.message || e);
-  }
-
-  // Cleanly switch to polling if a webhook exists (prevents 409)
-  try {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    console.log("🧹 Webhook deleted, switching to polling");
-  } catch (e: any) {
-    console.error("Webhook delete failed:", e?.message || e);
-  }
-
-  await launchBot();
-  console.log("🤖 Bot launched (polling)");
 });
 
-// graceful shutdown
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+// ---------------------------------------------------------------------------
+// Launch bot
+// ---------------------------------------------------------------------------
+async function launchBot() {
+  await connectDB();
+
+  const plan = { default: models.textDefault, heavy: models.textHeavy, vision: models.vision };
+  try {
+    const used = await preflightModels(plan);
+    console.log("🧠 Model plan:", used);
+  } catch (e: any) {
+    console.warn("OpenAI preflight skipped:", e?.message || e);
+  }
+
+  const bot = new Telegraf<Context>(BOT_TOKEN, tgOpts);
+
+  bot.start(async (ctx) => {
+    await ctx.reply(
+      "⭐ Today: Mathematics — high-frequency focus.\nReady?",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("⭐ Get Session", "START_SESSION")],
+        [
+          Markup.button.callback("🔁 Switch Subject", "SWITCH_QUICK"),
+          Markup.button.callback("📅 Plan", "OPEN_PLAN"),
+        ],
+      ])
+    );
+  });
+
+  registerStudy(bot);
+  registerStudyActions(bot);
+  registerDev(bot);
+  registerVoice(bot);
+
+  try {
+    if (WEBHOOK_URL) {
+      const path = `/bot${BOT_TOKEN}`;
+      await bot.telegram.setWebhook(`${WEBHOOK_URL}${path}`);
+      app.use(bot.webhookCallback(path));
+      console.log(`🔔 Webhook set: ${WEBHOOK_URL}${path}`);
+    } else {
+      try {
+        await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+        console.log("🔕 Webhook deleted, switching to polling");
+      } catch {}
+      await bot.launch();
+      console.log("▶️ Bot launched (polling)");
+    }
+  } catch (e: any) {
+    console.error("Bot launch error:", e?.message || e);
+    process.exitCode = 1;
+    return;
+  }
+
+  const stop = async () => {
+    try { await bot.stop("SIGTERM"); } catch {}
+    process.exit(0);
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+
+launchBot().catch((e) => {
+  console.error("Fatal boot error:", e?.message || e);
+  process.exit(1);
+});

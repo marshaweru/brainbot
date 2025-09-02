@@ -1,19 +1,21 @@
 // apps/bot/src/voice.ts
-import { Telegraf, Context, Markup } from "telegraf";
+import type { Telegraf, Context } from "telegraf";
+import { Markup } from "telegraf";
 import OpenAI from "openai";
 import { Readable } from "node:stream";
 import { toFile } from "openai/uploads";
-import ffmpegPath from "ffmpeg-static";
+import ffmpegStatic from "ffmpeg-static";
 import ffmpeg from "fluent-ffmpeg";
 import { fetch } from "undici";
-import { getVoicePrefs, setVoicePrefs, type VoiceLang } from "./utils/prefs";
+import { getVoicePrefs, setVoicePrefs, type VoiceLang } from "./utils/prefs.js";
 
 // ---------- OpenAI ----------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 // ---------- FFmpeg ----------
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
+const ffmpegBin = (ffmpegStatic as unknown as string) || "";
+if (ffmpegBin) {
+  ffmpeg.setFfmpegPath(ffmpegBin);
 } else {
   console.warn("[voice] ffmpeg-static not found; TTS → OGG may fail");
 }
@@ -79,7 +81,7 @@ async function synthesizeVoice(text: string): Promise<Buffer> {
   const input = text.length > MAX_TTS_CHARS ? text.slice(0, MAX_TTS_CHARS) : text;
 
   const speech = await openai.audio.speech.create({
-    model: "gpt-4o-mini-tts", // or "tts-1" if enabled
+    model: "gpt-4o-mini-tts",
     voice: "alloy",
     input,
   });
@@ -106,7 +108,7 @@ async function respond(ctx: Context, text: string) {
   }
 }
 
-// Minimal QA (swap in your real Brain prompt later)
+// Minimal QA
 async function answerStudent(question: string): Promise<string> {
   const prompt = `You are BrainBot, a KCSE coach. Explain clearly and briefly in KCSE exam style. Question: ${question}`;
   const chat = await openai.chat.completions.create({
@@ -121,7 +123,7 @@ function isMarkRequest(text: string) {
   return /\bmark(ing)?\b|\bmark my work\b|\bplease mark\b/i.test(text);
 }
 
-// --- Mini card renderer ---
+// --- Card + keyboard ---
 function renderVoiceCard(p: { tts: boolean; lang: VoiceLang }) {
   const status = p.tts ? "Voice + Text" : "Text only";
   const langLabel = p.lang === "en" ? "English" : p.lang === "sw" ? "Kiswahili" : "Auto";
@@ -133,7 +135,6 @@ function renderVoiceCard(p: { tts: boolean; lang: VoiceLang }) {
     "_Tip: Send a voice note to ask questions or say “mark my work”._",
   ].join("\n");
 }
-
 function prefsKeyboard() {
   return Markup.inlineKeyboard([
     [
@@ -189,15 +190,15 @@ export function registerVoice(bot: Telegraf) {
     });
   });
 
-  // Open the Voice Preferences card from inline buttons (e.g., from /me)
-bot.action("VOICE_OPEN", async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const telegramId = ctx.from?.id?.toString();
-  const prefs = telegramId ? await getVoicePrefs(telegramId) : { tts: false, lang: "auto" as VoiceLang };
-  await ctx.reply(renderVoiceCard(prefs), { parse_mode: "Markdown", ...prefsKeyboard() });
-});
+  // also allow opening from other places
+  bot.action("VOICE_OPEN", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const telegramId = ctx.from?.id?.toString();
+    const prefs = telegramId ? await getVoicePrefs(telegramId) : { tts: false, lang: "auto" as VoiceLang };
+    await ctx.reply(renderVoiceCard(prefs), { parse_mode: "Markdown", ...prefsKeyboard() });
+  });
 
-  // Voice test button — sends a short sample as a voice note (even if TTS is OFF)
+  // Voice test button — sends a short sample as a voice note
   bot.action("VOICE_TEST", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     try {

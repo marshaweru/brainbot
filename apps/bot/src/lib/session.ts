@@ -1,121 +1,116 @@
 // apps/bot/src/lib/session.ts
-import { SYSTEM_PROMPT } from "../prompts/system";
-import { callGpt } from "./openai";
-import { SESSION_BUDGET } from "../utils/tokenBudget";
-import { subjectType, QUICK_WINS } from "../utils/subjects";
+import { chatComplete } from "./openai.js";
+import {
+  REVEAL_SYSTEM_PROMPT,
+  buildRevealUserPrompt,
+  sessionMaxTokens,
+  textModelForTier,
+  type TierCode,
+  type SubjectSlug,
+} from "../prompts/system.js";
+import { chunkMarkdownV2 } from "./telegramFormat.js";
 
-export interface SessionRequest {
-  subject: string;                 // e.g., "Mathematics", "English", "Kiswahili"
-  mode: "quick" | "weak" | "drill";
-  level?: string;                  // optional: Form level / target grade etc.
-  topic?: string;                  // optional: caller-provided topic focus
+// ---------------- Types ----------------
+
+export interface GenerateSessionOpts {
+  subject: SubjectSlug;     // e.g., "mat"
+  label: string;            // e.g., "Mathematics"
+  topic: string;            // e.g., "Quadratics"
+  tier: TierCode;           // e.g., "lite" | "pro" | "serious" | "premium"
+  level?: "F1" | "F2" | "F3" | "F4";
+  monthsToKCSE?: number;
 }
 
-/* ---------------- helpers ---------------- */
-
-function rid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+export interface GenerateSessionResult {
+  raw: string;              // raw JSON string from the model (for debugging)
+  json?: any;               // parsed JSON if extraction succeeded
+  content: string;          // final Markdown sent to user
+  pdfMarkdown: string;      // same as content (or a slightly massaged version) for PDF
+  chunksV2: string[];       // Telegram-safe MarkdownV2 chunks
 }
 
-function fallbackSession(subject: string) {
-  const s = subject?.trim() || "General Studies";
-  return (
-    `# ${s}: Quick Session\n\n` +
-    `## Quick Notes\n` +
-    `- Key idea 1\n- Key idea 2\n- Key idea 3\n\n` +
-    `**Common traps**\n- Trap 1\n- Trap 2\n\n` +
-    `**Must-know**\n- Formula/definition (if any)\n\n` +
-    `## Mini-Quiz (KCSE-style)\n1) …\n2) …\n3) …\n\n` +
-    `_Answer here or tap “Mark My Work”._`
-  );
-}
+// -------------- helpers ---------------
 
-function languageNudgeFor(subject: string): string | null {
-  const s = subject.toLowerCase();
-  if (s.includes("kiswahili")) return "Use Kiswahili for explanations, examples, and questions.";
-  if (s.includes("english")) return "Use clear, KCSE-style English throughout.";
-  if (s.includes("french")) return "Use French in examples/vocabulary; brief instructions can be in English.";
-  if (s.includes("german")) return "Use German in examples/vocabulary; brief instructions can be in English.";
-  if (s.includes("arabic")) return "Use Arabic script where appropriate; brief instructions can be in English.";
-  return null;
-}
-
-function ensureStructure(content: string, subject: string): string {
-  const hasNotes = /quick notes|notes/i.test(content);
-  const hasQuiz = /mini[-\s]?quiz|quiz/i.test(content);
-  if (hasNotes && hasQuiz) return content;
-
-  // Append a minimal quiz if missing
-  let out = content.trim();
-  if (!hasQuiz) {
-    out += `\n\n## Mini-Quiz (KCSE-style)\n1) …\n2) …\n3) …`;
-  }
-  if (!hasNotes) {
-    out = `# ${subject}: Quick Session\n\n## Quick Notes\n- Key idea 1\n- Key idea 2\n\n` + out;
-  }
-  return out;
-}
-
-/* ---------------- main ---------------- */
-
-export async function generateSession(req: SessionRequest) {
-  const subject = (req.subject || "").trim() || "General Studies";
-  const sType = subjectType(subject);
-  const maxTokens =
-    sType === "language" ? SESSION_BUDGET.LANGUAGE_MAX : SESSION_BUDGET.NORMAL_MAX;
-
-  // Slightly cooler for drills; wrapper handles GPT-5 vs non-GPT-5
-  const temperature = req.mode === "drill" ? 0.4 : 0.6;
-
-  // System text with guard
-  const sysText =
-    (SYSTEM_PROMPT && SYSTEM_PROMPT.trim().length
-      ? SYSTEM_PROMPT.trim()
-      : "You are BrainBot, a KCSE study assistant. Be concise, KCSE-aligned, and practical.") +
-    `\n(Session budget available to toolchain. Session ID: ${rid()})`;
-
-  const topicHint =
-    (req.topic && req.topic.trim()) ||
-    QUICK_WINS[subject] ||
-    "a high-frequency topic for this subject";
-
-  const langNudge = languageNudgeFor(subject);
-
-  const userLines = [
-    `Generate a KCSE study session now.`,
-    `Subject: ${subject}`,
-    `Mode: ${req.mode} (quick=high-frequency, weak=common mistakes coaching, drill=past-paper mini set).`,
-    req.level ? `Level: ${req.level}` : ``,
-    req.mode === "quick" ? `If you need a topic, prefer: ${topicHint}.` : ``,
-    langNudge ? `Language note: ${langNudge}` : ``,
-    ``,
-    `# OUTPUT STRUCTURE`,
-    `1) Title line with subject & topic`,
-    `2) "Quick Notes" section (3–7 bullets)`,
-    `3) "Common traps" (2–4 bullets)`,
-    `4) "Must-know" formula/definition if relevant`,
-    `5) "Mini-Quiz (KCSE-style)" with 3–6 items`,
-    `- Keep it exam-grade and tight. No full answer key unless asked.`,
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
+function extractJson(raw: string): any | undefined {
+  // grab the first {...} block
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return undefined;
   try {
-    const content = await callGpt(
-      [
-        { role: "system", content: sysText } as any,
-        { role: "user", content: userLines } as any,
-      ],
-      sType === "language" ? "SESSION_LANGUAGE" : "SESSION_NORMAL",
-      maxTokens,
-      temperature
-    );
-
-    const clean = ensureStructure((content || "").trim(), subject);
-    return { content: clean, subjectType: sType };
-  } catch (e: any) {
-    console.error("[session] generateSession error:", e?.message || e);
-    return { content: fallbackSession(subject), subjectType: sType };
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return undefined;
   }
+}
+
+function mdFromRevealJson(obj: any): string {
+  if (!obj || typeof obj !== "object") return "";
+  const title = obj.title || "";
+  const topic = obj.topic || "";
+  const paper = obj.paper || "Mixed";
+  const notes = (obj.notes_md || "").trim();
+  const assignment = (obj.assignment_md || "").trim();
+  const extras = (obj.extras_md || "").trim();
+  const plan60 = (obj.plan60_md || "").trim();
+
+  // quiz array -> markdown
+  const quizLines = Array.isArray(obj.quiz)
+    ? obj.quiz
+        .map(
+          (q: any) =>
+            `### ${q.id || "Q"} • ${q.marks ?? ""} marks\n` +
+            `${(q.q_md || "").trim()}`
+        )
+        .join("\n\n")
+    : "";
+
+  return [
+    `# ${title}`.trim(),
+    topic ? `\nTopic: ${topic}\n\nPaper: ${paper}` : `Paper: ${paper}`,
+    notes ? `\n\n## A. Examinable Notes\n\n${notes}` : "",
+    assignment ? `\n\n## B. Notebook Assignment\n\n${assignment}` : "",
+    quizLines ? `\n\n## C. KCSE-Style Questions\n\n${quizLines}` : "",
+    extras ? `\n\n## D. Examiner Extras\n\n${extras}` : "",
+    plan60 ? `\n\n## E. 60-Minute Plan\n\n${plan60}` : "",
+  ]
+    .join("")
+    .trim();
+}
+
+// -------------- main -------------------
+
+export async function generateSession(
+  opts: GenerateSessionOpts
+): Promise<GenerateSessionResult> {
+  const model = textModelForTier(opts.tier);
+  const maxTokens = sessionMaxTokens(opts.subject, opts.tier);
+
+  // User prompt (reveal-mode JSON)
+  const userPrompt = buildRevealUserPrompt({
+    subject: opts.subject,
+    label: opts.label,
+    topic: opts.topic,
+    tier: opts.tier,
+    level: opts.level,
+    monthsToKCSE: opts.monthsToKCSE,
+  });
+
+  // chatComplete returns RAW string (model must return JSON per REVEAL_SYSTEM_PROMPT)
+  const raw: string = await chatComplete({
+    model,
+    maxTokens,
+    messages: [
+      { role: "system", content: REVEAL_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  const json = extractJson(raw);
+  const content = mdFromRevealJson(json) || raw.trim();
+  const pdfMarkdown = content;
+
+  // Telegram-safe chunks (MarkdownV2)
+  const chunksV2 = chunkMarkdownV2(content, 3900);
+
+  return { raw, json, content, pdfMarkdown, chunksV2 };
 }

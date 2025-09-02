@@ -1,5 +1,5 @@
 // apps/bot/src/utils/subjects.ts
-import { labelBySlug, slugByLabel } from "../data/subjectsCatalog";
+import { labelBySlug, slugByLabel } from "../data/subjectsCatalog.js";
 
 /**
  * Language detection + quick-topic hints (QUICK_WINS)
@@ -9,10 +9,14 @@ import { labelBySlug, slugByLabel } from "../data/subjectsCatalog";
 
 export type SubjectType = "language" | "normal";
 
+/** ---- Loosen catalog key types at this boundary (user-input friendly) ---- */
+const LBS = labelBySlug as unknown as Map<string, string>; // slug -> label
+const SBL = slugByLabel as unknown as Map<string, string>; // label -> slug
+
 /** Build a robust label set for language subjects (includes common aliases). */
 const LANG_LABELS = new Set<string>([
-  labelBySlug.get("eng") || "English",
-  labelBySlug.get("kis") || "Kiswahili",
+  LBS.get("eng") || "English",
+  LBS.get("kis") || "Kiswahili",
   "English Language",
   "Kiswahili Lugha",
 ]);
@@ -24,12 +28,14 @@ export const LANGUAGE_SUBJECTS = LANG_LABELS;
 function labelToSlugInsensitive(label: string): string | null {
   const want = (label || "").trim().toLowerCase();
   if (!want) return null;
-  // Fast exact lookup first
-  const exact = slugByLabel.get(label);
+
+  // Fast exact lookup first (now accepts string)
+  const exact = SBL.get(label);
   if (exact) return exact;
+
   // Case-insensitive scan (labels are few; cost is tiny)
-  for (const [lbl, slug] of slugByLabel.entries()) {
-    if (lbl.toLowerCase() === want) return slug;
+  for (const [lbl, slug] of SBL.entries()) {
+    if ((lbl || "").toLowerCase() === want) return slug;
   }
   return null;
 }
@@ -38,9 +44,12 @@ function labelToSlugInsensitive(label: string): string | null {
 function toSlug(input: string): string | null {
   const raw = (input || "").trim();
   if (!raw) return null;
+
   const lc = raw.toLowerCase();
+
   // If it's already a known slug (eng/kis/mat/…)
-  if (labelBySlug.has(lc)) return lc;
+  if (LBS.has(lc)) return lc;
+
   // Try label → slug
   return labelToSlugInsensitive(raw);
 }
@@ -49,9 +58,12 @@ function toSlug(input: string): string | null {
 export function subjectType(nameOrSlug: string): SubjectType {
   const slug = toSlug(nameOrSlug);
   if (slug === "eng" || slug === "kis") return "language";
+
   // Fallback by label set (handles aliases like "Kiswahili Lugha")
-  const label = slug ? (labelBySlug.get(slug) || nameOrSlug) : nameOrSlug;
-  const isLang = [...LANG_LABELS].some((l) => l.toLowerCase() === (label || "").toLowerCase());
+  const label = slug ? (LBS.get(slug) || nameOrSlug) : nameOrSlug;
+  const isLang = [...LANG_LABELS].some(
+    (l) => (l || "").toLowerCase() === (label || "").toLowerCase()
+  );
   return isLang ? "language" : "normal";
 }
 

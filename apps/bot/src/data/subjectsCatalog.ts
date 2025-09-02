@@ -1,7 +1,7 @@
-// Canonical KCSE subject catalog (no Telegraf deps here)
-export type Subj = { slug: string; label: string };
+// apps/bot/src/data/subjectsCatalog.ts
 
-export const SUBJECTS: Subj[] = [
+/** Canonical KCSE subjects (frozen for literal types) */
+export const SUBJECTS = [
   { slug: "eng", label: "English" },
   { slug: "kis", label: "Kiswahili" },
   { slug: "mat", label: "Mathematics" },
@@ -27,7 +27,31 @@ export const SUBJECTS: Subj[] = [
   { slug: "mtl", label: "Metalwork" },
   { slug: "elc", label: "Electricity" },
   { slug: "pwm", label: "Power Mechanics" },
-];
+] as const;
+
+export type Subj = (typeof SUBJECTS)[number];
+export type SubjectSlug = Subj["slug"];
+export type SubjectLabel = Subj["label"];
+
+/** Quick lookups */
+export const labelBySlug = new Map<SubjectSlug, SubjectLabel>(
+  SUBJECTS.map(s => [s.slug, s.label])
+);
+export const slugByLabel = new Map<SubjectLabel, SubjectSlug>(
+  SUBJECTS.map(s => [s.label, s.slug])
+);
+
+/** Helpers */
+export const ALL_SLUGS = SUBJECTS.map(s => s.slug) as SubjectSlug[];
+export const LANGUAGE_SLUGS = ["eng", "kis"] as const;
+export type LanguageSlug = (typeof LANGUAGE_SLUGS)[number];
+
+export function isSubjectSlug(x: string): x is SubjectSlug {
+  return (ALL_SLUGS as readonly string[]).includes(x);
+}
+export function isLanguageSlug(x: string): x is LanguageSlug {
+  return (LANGUAGE_SLUGS as readonly string[]).includes(x as any);
+}
 
 /**
  * Default preselected subjects when the picker first opens / on "Reset".
@@ -42,14 +66,14 @@ export const CORE_LABELS = [
   "Physics",
   "Geography",
   "Business Studies",
-];
+] as const;
 
-export const labelBySlug = new Map(SUBJECTS.map(s => [s.slug, s.label]));
-export const slugByLabel = new Map(SUBJECTS.map(s => [s.label, s.slug]));
-
-/** Convenience: core set as slugs (useful for defaults, tests, etc.) */
-export const CORE_SLUGS: string[] =
-  CORE_LABELS.map(l => slugByLabel.get(l)!).filter(Boolean) as string[];
+export const CORE_SLUGS = CORE_LABELS
+  .map(l => slugByLabel.get(l)!)
+  .filter(Boolean) as SubjectSlug[];
 
 /** Convenience: quick-start subjects we surface in free trial & CTA */
 export const QUICK_START_SLUGS = ["mat", "eng", "kis"] as const;
+
+/** Compulsory set (Math + a language) */
+export const COMPULSORY_SLUGS = ["mat", "eng", "kis"] as const;

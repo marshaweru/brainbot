@@ -1,14 +1,14 @@
-// apps/bot/src/lib/telegram.ts
-import { Telegraf, Context } from "telegraf";
-import { registerStart } from "../commands/start";
-import { registerSmartStart } from "../commands/smartStart";
-// subjects.ts exports `registerSubjectHandlers` — alias it to registerSubjects
-import { registerSubjectHandlers as registerSubjects } from "../commands/subjects";
-import { registerStudyActions } from "../commands/studyActions";
-import { registerOnboard } from "../commands/onboard";
-import { registerDev } from "../commands/dev";
+import { Telegraf } from "telegraf";
+import type { Context } from "telegraf";
 
-// --- Bot token ---
+import { registerSmartStart } from "../commands/smartStart.js";
+import { registerSubjectHandlers as registerSubjects } from "../commands/subjects.js";
+import { registerStudyActions } from "../commands/studyActions.js";
+import { registerOnboard } from "../commands/onboard.js";
+import { registerDev } from "../commands/dev.js";
+import { registerVoice } from "../voice.js";            // ⬅️ correct path
+import { registerStudy } from "../commands/study.js";
+
 const TOKEN =
   process.env.TELEGRAM_BOT_TOKEN ||
   process.env.BOT_TOKEN ||
@@ -16,30 +16,35 @@ const TOKEN =
 
 if (!TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is missing");
 
-// Create a single shared Telegraf instance
-export const bot = new Telegraf<Context>(TOKEN, {
-  handlerTimeout: 90_000, // avoid long-hanging handlers
+export const bot: Telegraf<Context> = new Telegraf<Context>(TOKEN, {
+  handlerTimeout: 90_000,
 });
 
-// Register all features here (one place to rule them all)
-registerStart(bot);
+// Register features
 registerSmartStart(bot);
 registerSubjects(bot);
 registerStudyActions(bot);
 registerOnboard(bot);
 registerDev(bot);
+registerVoice(bot);
+registerStudy(bot); // ✅ /study wired here
 
-// Optional convenience: launch + graceful shutdown
+bot.catch((err, ctx) => {
+  console.error("Telegraf error for", ctx.updateType, err);
+});
+
 export async function launchBot() {
   await bot.launch();
-  const uname = process.env.NEXT_PUBLIC_TG_BOT_USERNAME || "(unknown)";
+  const uname =
+    process.env.NEXT_PUBLIC_TG_BOT_USERNAME ||
+    process.env.TELEGRAM_BOT_USERNAME ||
+    "(unknown)";
   console.log(`🤖 BrainBot launched as @${uname}`);
 
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 }
 
-// --- Lightweight fetch-based notifier (useful from webhooks/workers) ---
 export async function sendTelegramMessage(
   chatId: string,
   text: string,
