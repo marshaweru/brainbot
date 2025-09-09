@@ -1,0 +1,12 @@
+{
+  "name": "brainbot-root",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:bot": "npm run dev --workspace=apps/bot",
+    "start:web": "npm run start --workspace=apps/web",
+    "start:bot": "npm run start --workspace=apps/bot"
+  }
+}
