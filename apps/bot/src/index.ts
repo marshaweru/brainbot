@@ -1,10 +1,8 @@
-// apps/bot/src/index.ts
 import "dotenv/config";
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 
-import { SUBJECTS } from "@brainbot/shared";
-
+import { SUBJECTS, subjectByNumber } from "./subjects";
 import { registerExportPdf } from "./handlers/export-pdf";
 import { toFeedback } from "./feedback/adapter";
 import { buildFeedbackMessage, type Feedback } from "./feedback/render";
@@ -15,10 +13,11 @@ import {
   setSession,
   addUpload,
   clearSession,
-  type Upload,
-} from "./session/state";
+  type Upload,            // 👈 fixes “Cannot find name 'Upload'”
+} from "./repo/sessionRepo";
 
-// Your existing logic:
+import { connectMongo } from "./db/mongo";
+
 import { handleMarking } from "./marking";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -36,12 +35,9 @@ const escHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const subjectsList = () =>
-  SUBJECTS.map(
-    (s: any, i: number) =>
-      `- <code>${i + 1}</code> ${escHtml(typeof s === "string" ? s : s.label)}`
-  ).join("\n");
+  SUBJECTS.map((s) => `- <code>${s.idx}</code> ${escHtml(s.label)}`).join("\n");
 
-// ── Normalizer: pipeline → RawMarking expected by toFeedback ───────────────────
+// ---------- Feedback normalizer ----------
 type RawMarking = {
   paper: string;
   subject: string;
@@ -53,7 +49,6 @@ type RawMarking = {
   rubric: { criterion: string; levels: string[] }[];
 };
 
-// Heuristic grade bands; tweak to match KCSE mapping later
 function toGrade(pct: number): string {
   if (pct >= 80) return "A";
   if (pct >= 75) return "A-";
@@ -69,23 +64,11 @@ function toGrade(pct: number): string {
   return "E";
 }
 
-/**
- * Accepts the raw object your marking pipeline returns (often question-level),
- * and condenses it into the summary shape for toFeedback().
- */
-function normalizePipelineOutput(
-  raw: any,
-  subjectLabel: string | undefined
-): RawMarking {
-  // Handle a few possible shapes:
-  // 1) { sections: [{ name, score, outOf }], weak: [{ topic, tip }], rubric: [...] }
-  // 2) { questions: [{ section?, score, outOf, tip?, rubricStep? }], ... }
-  // 3) Flat { score, outOf, rubric: [{ step, mark, correct }], tip }
+function normalizePipelineOutput(raw: any, subjectLabel?: string): RawMarking {
   let sections: { section: string; score: number; outOf: number }[] = [];
   let weakTopics: { topic: string; tip: string }[] = [];
   let rubric: { criterion: string; levels: string[] }[] = [];
 
-  // Sections
   if (Array.isArray(raw?.sections)) {
     sections = raw.sections.map((s: any, idx: number) => ({
       section: String(s.name ?? s.section ?? `Section ${idx + 1}`),
@@ -93,11 +76,7 @@ function normalizePipelineOutput(
       outOf: Number(s.outOf ?? 0),
     }));
   } else if (Array.isArray(raw?.questions)) {
-    // Aggregate per-question into section buckets if provided
-    const bucket = new Map<
-      string,
-      { score: number; outOf: number }
-    >();
+    const bucket = new Map<string, { score: number; outOf: number }>();
     for (const q of raw.questions) {
       const key = String(q.section ?? "Paper");
       const cur = bucket.get(key) ?? { score: 0, outOf: 0 };
@@ -117,19 +96,10 @@ function normalizePipelineOutput(
       outOf: v.outOf,
     }));
   } else if (typeof raw?.score === "number" && typeof raw?.outOf === "number") {
-    sections = [
-      {
-        section: "Paper",
-        score: Number(raw.score),
-        outOf: Number(raw.outOf),
-      },
-    ];
-    if (raw.tip) {
-      weakTopics.push({ topic: "General", tip: String(raw.tip) });
-    }
+    sections = [{ section: "Paper", score: Number(raw.score), outOf: Number(raw.outOf) }];
+    if (raw.tip) weakTopics.push({ topic: "General", tip: String(raw.tip) });
   }
 
-  // Weak topics (top-level array support)
   if (Array.isArray(raw?.weakTopics)) {
     weakTopics = raw.weakTopics.map((w: any) => ({
       topic: String(w.topic ?? "Topic"),
@@ -137,9 +107,7 @@ function normalizePipelineOutput(
     }));
   }
 
-  // Rubric: collapse various shapes into criterion/levels
   if (Array.isArray(raw?.rubric)) {
-    // shape: [{ criterion, levels[] }] OR [{ step, mark, correct }]
     rubric = raw.rubric.map((r: any) => {
       if (Array.isArray(r.levels)) {
         return {
@@ -155,13 +123,14 @@ function normalizePipelineOutput(
         r.mark != null
           ? String(r.mark)
           : r.correct != null
-          ? (r.correct ? "Correct" : "Incorrect")
+          ? r.correct
+            ? "Correct"
+            : "Incorrect"
           : "";
       return { criterion: label, levels: [mark].filter(Boolean) };
     });
   }
 
-  // Totals
   const totalScore = sections.reduce((s, x) => s + x.score, 0);
   const outOf = sections.reduce((s, x) => s + x.outOf, 0);
   const pct = outOf > 0 ? (totalScore / outOf) * 100 : 0;
@@ -178,7 +147,7 @@ function normalizePipelineOutput(
   };
 }
 
-// ── /start ──────────────────────────────────────────────────────────────────────
+// ---------- Commands ----------
 bot.start(async (ctx) => {
   await ctx.reply(
     `<b>Welcome to BrainBot!</b> 🚀
@@ -199,7 +168,6 @@ Or <code>/upgrade</code> to unlock more features.
   );
 });
 
-// ── /session → awaiting-subject ────────────────────────────────────────────────
 bot.command("session", async (ctx) => {
   const uid = String(ctx.from?.id ?? "");
   await setSession(uid, {
@@ -221,30 +189,28 @@ ${subjectsList()}
   );
 });
 
-// ── Subject selection (numeric reply) ──────────────────────────────────────────
 bot.on(message("text"), async (ctx, next) => {
   const uid = String(ctx.from?.id ?? "");
   const sess = await loadSession(uid);
-
   const text = (ctx.message as any).text?.trim() ?? "";
 
-  // If we're awaiting a subject, parse number and start
   if (sess.mode === "awaiting-subject") {
     const n = Number(text);
     if (!Number.isInteger(n) || n < 1 || n > SUBJECTS.length) {
       return ctx.reply("Please reply with a valid subject number from the list.");
     }
-    const chosen = SUBJECTS[n - 1];
-    const label = typeof chosen === "string" ? chosen : chosen.label;
+
+    const chosen = subjectByNumber(n);
+    if (!chosen) return ctx.reply("That number isn’t on the list. Try again.");
 
     await setSession(uid, {
       mode: "in-progress",
       subjectIndex: n - 1,
-      subjectLabel: label,
+      subjectLabel: chosen.label,
     });
 
     return ctx.reply(
-      `✅ <b>${escHtml(label)}</b> selected.
+      `✅ <b>${escHtml(chosen.label)}</b> selected.
 
 <b>Send your answers now</b>:
 • <b>Photos</b> (handwritten pages)
@@ -257,22 +223,19 @@ When done, type <code>/finish</code> to get examiner feedback.`,
     );
   }
 
-  // If we're in-progress and it's not a command, treat as text answer
   if (sess.mode === "in-progress" && !text.startsWith("/")) {
     const u: Upload = { kind: "text", text };
     await addUpload(uid, u);
     return ctx.reply("📝 Saved your text answer ✅");
   }
 
-  // Otherwise let other handlers consider it
   return next();
 });
 
-// ── Photo uploads (scanned/handwritten pages) ──────────────────────────────────
 bot.on(message("photo"), async (ctx) => {
   const uid = String(ctx.from?.id ?? "");
   const sess = await loadSession(uid);
-  if (sess.mode !== "in-progress") return; // ignore if not in a session
+  if (sess.mode !== "in-progress") return;
 
   const photos = (ctx.message as any).photo as Array<{
     file_id: string;
@@ -280,7 +243,6 @@ bot.on(message("photo"), async (ctx) => {
     width: number;
     height: number;
   }>;
-  // Telegram sends multiple sizes; take the highest resolution (last one)
   const fileId = photos?.[photos.length - 1]?.file_id;
   const caption = (ctx.message as any).caption as string | undefined;
 
@@ -289,7 +251,6 @@ bot.on(message("photo"), async (ctx) => {
   await ctx.reply("🖼️ Photo saved ✅");
 });
 
-// ── Document uploads (PDFs/images as files) ────────────────────────────────────
 bot.on(message("document"), async (ctx) => {
   const uid = String(ctx.from?.id ?? "");
   const sess = await loadSession(uid);
@@ -305,7 +266,6 @@ bot.on(message("document"), async (ctx) => {
   await ctx.reply("📄 Document saved ✅");
 });
 
-// ── Voice uploads (explanations) ───────────────────────────────────────────────
 bot.on(message("voice"), async (ctx) => {
   const uid = String(ctx.from?.id ?? "");
   const sess = await loadSession(uid);
@@ -320,7 +280,6 @@ bot.on(message("voice"), async (ctx) => {
   await ctx.reply("🎙️ Voice note saved ✅");
 });
 
-// ── Finish & Mark ─────────────────────────────────────────────────────────────
 bot.command("finish", async (ctx) => {
   const uid = String(ctx.from?.id ?? "");
   const sess = await loadSession(uid);
@@ -329,25 +288,17 @@ bot.command("finish", async (ctx) => {
     return ctx.reply("No active session. Start with /session first.");
   }
 
-  // Build the payload for your marking pipeline
   const payload = {
     userId: uid,
     subject: sess.subjectLabel,
-    uploads: sess.uploads, // photos/voice/docs/text captured during the session
+    uploads: sess.uploads,
     startedAt: sess.startedAt,
   };
 
   await ctx.reply("🧪 Marking your paper…");
 
-  // ✅ handleMarking expects ONE argument; remove ctx
   const pipelineRaw = await handleMarking(payload as any);
-
-  // ✅ squash to the summary RawMarking that toFeedback expects
-  const raw: RawMarking = normalizePipelineOutput(
-    pipelineRaw,
-    sess.subjectLabel
-  );
-
+  const raw: RawMarking = normalizePipelineOutput(pipelineRaw, sess.subjectLabel);
   const feedback: Feedback = toFeedback(raw as any);
 
   await saveFeedback(uid, feedback);
@@ -363,7 +314,6 @@ bot.command("finish", async (ctx) => {
   await clearSession(uid);
 });
 
-// ── Upgrade (unchanged) ───────────────────────────────────────────────────────
 bot.command("upgrade", async (ctx) => {
   await ctx.reply(
     `<b>Upgrade to unlock more papers, hours, and features:</b>
@@ -382,11 +332,14 @@ Type <code>/paid</code> once you have paid.`,
 
 (async () => {
   try {
+    await connectMongo(); // show “✅ Mongo connected”
+
     const me = await bot.telegram.getMe();
     console.log(`🔑 Auth OK: @${me.username} (id ${me.id})`);
   } catch (err) {
-    console.error("💥 bot.getMe() failed:", err);
+    console.error("💥 startup error:", err);
   }
+
   await bot.launch();
   console.log("🚀 BrainBot Telegram bot running! Listening for updates…");
 })();

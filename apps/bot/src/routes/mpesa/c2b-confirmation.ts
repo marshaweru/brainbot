@@ -1,48 +1,57 @@
-// apps/bot/src/routes/mpesa/c2b-confirmation.ts
-import express, { Request, Response } from "express";
-import {
-  upgradeUserPlan,
-  planFromAmount,
-  type PlanTier,
-} from "@brainbot/shared";
+import express, { type Request, type Response } from "express";
+import { planFromAmount, upgradeUserPlan } from "../../repo/planRepo";
 
-const router = express.Router();
+export const router = express.Router();
 
 router.post("/", async (req: Request, res: Response) => {
-  // Immediately ACK Safaricom (so they don't retry)
-  res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
+  // respond immediately to Daraja
+  res.json({ ok: true });
 
-  try {
-    const body = req.body ?? {};
-    const telegramId = String(body.BillRefNumber ?? body.billRef ?? "").trim();
-    const amountKES = Number(body.Amount ?? body.TransAmount ?? body.amount ?? 0);
-    const receipt = String(body.TransID ?? body.transId ?? body.receipt ?? "").trim();
+  (async () => {
+    try {
+      const body = req.body;
+      const cb = body?.Body?.stkCallback;
+      if (!cb) return;
 
-    if (!telegramId || !amountKES) {
-      console.warn("[C2B] Missing telegramId/amount", { telegramId, amountKES });
-      return;
+      const resultCode = Number(cb?.ResultCode ?? 1);
+      const resultDesc = String(cb?.ResultDesc || "");
+
+      if (resultCode !== 0) {
+        console.error("❌ STK failed:", resultDesc);
+        return;
+      }
+
+      // Extract metadata
+      const items = (cb?.CallbackMetadata?.Item ?? []) as Array<{ Name: string; Value: any }>;
+      let amount: number | null = null;
+      let accountRef: string | null = null; // we pass Telegram ID here during STK init
+
+      for (const it of items) {
+        if (it.Name === "Amount") amount = Number(it.Value);
+        if (it.Name === "AccountReference") accountRef = String(it.Value);
+      }
+
+      if (amount == null) {
+        console.error("❌ STK callback missing Amount:", items);
+        return;
+      }
+      if (!accountRef) {
+        console.error("❌ STK callback missing AccountReference (Telegram ID):", items);
+        return;
+      }
+
+      const mapping = planFromAmount(amount);
+      if (!mapping) {
+        console.error("❌ Unknown payment amount:", amount);
+        return;
+      }
+      const { tier, days } = mapping;
+
+      await upgradeUserPlan(accountRef, tier, { days });
+
+      console.log(`🎉 Upgraded ${accountRef} → ${tier} (${days} days) [KES ${amount}]`);
+    } catch (err) {
+      console.error("💥 STK callback handler error:", err);
     }
-
-    const plan = planFromAmount(amountKES);
-    if (!plan) {
-      console.warn("[C2B] Unknown amount, no plan matched", { amountKES, telegramId, receipt });
-      return;
-    }
-
-    const tier = plan.code as Exclude<PlanTier, "free">;
-    const days = plan.days;
-
-    await upgradeUserPlan(telegramId, tier, {
-      days,
-      lifetime: tier === "limited",
-      receipt,
-    });
-
-    console.log("[C2B] Upgraded", { telegramId, tier, days, lifetime: tier === "limited", receipt });
-    // TODO: optionally bot.telegram.sendMessage(telegramId, `Your ${plan.label} is active ✅`)
-  } catch (err) {
-    console.error("[C2B] handler error", err);
-  }
+  })();
 });
-
-export default router;

@@ -1,10 +1,15 @@
 import "./globals.css";
-import { ReactNode } from "react";
+import type { Metadata } from "next";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export const metadata: Metadata = {
+  title: "BrainBot",
+  description: "KCSE trainer",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gradient-to-br from-brand-100 via-white to-blue-100 dark:from-gray-900 dark:via-gray-950 dark:to-gray-900">
+      <body className="bg-gradient-to-br from-ink-900 via-ink-800 to-ink-900 text-white">
         {children}
       </body>
     </html>

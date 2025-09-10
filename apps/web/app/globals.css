@@ -1,39 +1,25 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Glassmorphism styling tuned for dark premium palette */
+/* Glass containers */
 .glass {
-  background: rgba(255, 255, 255, 0.06); /* subtle white overlay */
-  box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.35);
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
 }
 
-/* Optional lighter glass for sections/cards that sit on very dark backgrounds */
 .glass-light {
-  background: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  background: rgba(255,255,255,0.04);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
 }
 
-/* Scrollbar styling for premium feel */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+/* Optional small glow for hero subtitle icons */
+.text-shadow-soft {
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
 }

@@ -33,6 +33,7 @@ export async function buildPdfBuffer(
   const html = template(feedback, brand);
 
   const browser = await puppeteer.launch({
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
     // headless mode is default; explicitly set if needed:
     // headless: "new",
     // For serverless/docker environments, you often need:
