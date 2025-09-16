@@ -1,100 +1,105 @@
-// apps/bot/src/repo/sessionRepo.ts
-import { connectMongo } from "../db/mongo";
-import { SessionModel, type SessionDoc } from "../models/Session";
+import { SessionModel, SessionDoc } from "../models/Session";
 
-/** Uploads your bot accepts (matches index.ts) */
-export type Upload =
-  | { kind: "text"; text: string }
-  | { kind: "photo"; fileId: string; caption?: string }
-  | { kind: "document"; fileId: string; mimeType?: string; caption?: string }
-  | { kind: "voice"; fileId: string; duration?: number };
-
-/** Session state shape your bot uses */
-export type SessionState = {
-  mode: "awaiting-subject" | "in-progress" | null;
-  subjectIndex?: number;
-  subjectLabel?: string;
-  startedAt?: number;  // epoch ms (we store Date in Mongo, convert here)
-  uploads: Upload[];
-};
+export type LeanSession = Pick<
+  SessionDoc,
+  | "telegramId"
+  | "active"
+  | "mode"
+  | "subjectIndex"
+  | "subjectLabel"
+  | "paper"
+  | "startedAt"
+  | "finishedAt"
+  | "examPreset"
+  | "examEndsAt"
+  | "uploadEndsAt"
+  | "expiresAt"
+>;
 
 const TTL_HOURS = Math.max(1, Number(process.env.SESSION_TTL_HOURS ?? 3));
-
-function toState(doc?: SessionDoc | null): SessionState {
-  if (!doc) return { mode: null, uploads: [] };
-  return {
-    mode: (doc.mode as any) ?? null,
-    subjectIndex: doc.subjectIndex ?? undefined,
-    subjectLabel: doc.subjectLabel ?? undefined,
-    startedAt: doc.startedAt ? doc.startedAt.getTime() : undefined,
-    uploads: (doc.uploads as any) ?? [],
-  };
+function computeExpiry(): Date {
+  return new Date(Date.now() + TTL_HOURS * 3600 * 1000);
 }
 
-/** Read current active session (auto-connects to Mongo) */
-export async function loadSession(telegramId: string): Promise<SessionState> {
-  await connectMongo();
-  const doc = await SessionModel.findOne({ telegramId, active: true }).lean();
-  return toState(doc as any);
-}
+export async function createSession(params: {
+  telegramId: string;
+  subjectIndex?: number;
+  subjectLabel?: string;
+  paper?: 1 | 2 | 3;
+}) {
+  const { telegramId, subjectIndex, subjectLabel, paper } = params;
 
-/** Create or patch the active session; extends TTL on every write */
-export async function setSession(
-  telegramId: string,
-  patch: Partial<SessionState> & { mode?: "awaiting-subject" | "in-progress" | null }
-): Promise<void> {
-  await connectMongo();
+  await SessionModel.updateMany(
+    { telegramId, active: true, expiresAt: { $gt: new Date() } },
+    { $set: { active: false } }
+  );
 
-  const $set: any = {
+  const doc = await SessionModel.create({
+    telegramId,
     active: true,
-    expiresAt: new Date(Date.now() + TTL_HOURS * 3600 * 1000),
-    updatedAt: new Date(),
-  };
+    mode: "in-progress",
+    subjectIndex: subjectIndex ?? null,
+    subjectLabel: subjectLabel ?? null,
+    paper: paper ?? null,
+    startedAt: new Date(),
+    expiresAt: computeExpiry(),
+  });
 
-  if (patch.mode != null) $set.mode = patch.mode;
-  if (patch.subjectIndex != null) $set.subjectIndex = patch.subjectIndex;
-  if (patch.subjectLabel != null) $set.subjectLabel = patch.subjectLabel;
-  if (patch.startedAt != null) $set.startedAt = new Date(patch.startedAt);
-  if (patch.uploads != null) $set.uploads = patch.uploads;
-
-  await SessionModel.findOneAndUpdate(
-    { telegramId, active: true },
-    {
-      $setOnInsert: {
-        telegramId,
-        active: true,
-        startedAt: new Date(),
-      },
-      $set,
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  return doc.toObject() as LeanSession;
 }
 
-/** Push a single upload into the active session; creates one if missing */
-export async function addUpload(telegramId: string, upload: Upload): Promise<void> {
-  await connectMongo();
-  await SessionModel.findOneAndUpdate(
-    { telegramId, active: true },
-    {
-      $setOnInsert: {
-        telegramId,
-        active: true,
-        mode: "in-progress",
-        startedAt: new Date(),
-      },
-      $push: { uploads: upload as any },
-      $set: { expiresAt: new Date(Date.now() + TTL_HOURS * 3600 * 1000) },
-    },
-    { upsert: true }
-  );
+export async function getActiveByTelegramId(
+  tgId: string
+): Promise<LeanSession | null> {
+  return SessionModel.findOne({
+    telegramId: tgId,
+    active: true,
+    expiresAt: { $gt: new Date() },
+  }).lean<LeanSession | null>();
 }
 
-/** Mark the session inactive & let TTL clean it up */
-export async function clearSession(telegramId: string): Promise<void> {
-  await connectMongo();
+/**
+ * Append an upload to the active session.
+ * Saves both in the session doc and tags it with sessionId.
+ */
+export async function sessionAddUpload(
+  telegramId: string | number,
+  upload: any
+) {
+  const tid = String(telegramId);
+  const active = await SessionModel.findOne({
+    telegramId: tid,
+    active: true,
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (!active) throw new Error("No active session to attach upload.");
+
+  const enriched = { ...upload, sessionId: String(active._id) };
+
   await SessionModel.updateOne(
-    { telegramId, active: true },
-    { $set: { active: false, expiresAt: new Date(), updatedAt: new Date() } }
+    { _id: active._id },
+    { $push: { uploads: enriched } }
   );
+
+  return enriched;
+}
+
+/**
+ * List all uploads tied to a specific session.
+ */
+export async function listUploadsBySession(sessionId: string) {
+  const doc = await SessionModel.findById(sessionId).lean<SessionDoc | null>();
+  if (!doc) throw new Error(`Session not found: ${sessionId}`);
+  return doc.uploads ?? [];
+}
+
+export async function finishActive(
+  tgId: string
+): Promise<LeanSession | null> {
+  return SessionModel.findOneAndUpdate(
+    { telegramId: tgId, active: true, expiresAt: { $gt: new Date() } },
+    { $set: { active: false, finishedAt: new Date(), mode: "finished" } },
+    { new: true }
+  ).lean<LeanSession | null>();
 }

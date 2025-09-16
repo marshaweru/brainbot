@@ -1,111 +1,230 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useState } from "react";
-import KCSEBadge from "../../components/KCSEBadge";
-import ExpiryCountdown from "../../components/ExpiryCountdown";
+import KCSEBadge from "@/components/KCSEBadge";
+import StatCard from "@/components/StatCard";
+import FilterBar from "@/components/FilterBar";
+import TrendLine from "@/components/TrendLine";
+import TopicHeatmap from "@/components/TopicHeatmap";
 
-// Placeholder data (replace with backend/api logic later)
-const userStats = {
-  papersDone: 1,
-  bestScore: 78,
-  weakTopics: ["Algebra", "Probability", "Geography"],
-  plan: "Free 3-Hour Trial",
-  expires: "in 2h 10m",
+type Stats = {
+  plan: string;
+  papersDone: number;
+  bestScore: number;
+  weakTopics: string[];
+  lastFinishedAt: string | null; // ISO
 };
 
-export default function DashboardPage() {
-  const [showUpgrade, setShowUpgrade] = useState(true);
+type Latest = null | {
+  subjectLabel: string;
+  gradeNumeric: number;
+  gradeText: string;
+  weakTopics: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt?: string; // fallback if finishedAt not yet stamped
+};
+
+type ApiResp = {
+  wid: string;
+  linked: boolean;
+  stats: Stats;
+  latest: Latest;
+};
+
+function fmtDate(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function Dashboard() {
+  const [data, setData] = useState<ApiResp | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [wid, setWid] = useState<string>("");
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  const [compare, setCompare] = useState<boolean>(false);
+  const [range, setRange] = useState<"90d" | "6mo" | "all">("90d");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const w =
+      typeof window !== "undefined"
+        ? localStorage.getItem("brainbot:wid") || ""
+        : "";
+
+    setWid(w);
+
+    if (!w) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+
+    fetch(`/api/user-stats/${w}`, { cache: "no-store", signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((json: ApiResp) => setData(json))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+
+    fetch(`/api/subjects/${w}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((j) => setSubjects(j.subjects || []))
+      .catch(() => setSubjects([]));
+
+    return () => controller.abort();
+  }, []);
+
+  const plan = data?.stats.plan ?? "free";
+  const last = fmtDate(data?.stats.lastFinishedAt);
+  const weak = data?.stats.weakTopics?.length
+    ? data.stats.weakTopics.join(", ")
+    : "—";
+  const latestFinish = fmtDate(
+    data?.latest?.finishedAt || data?.latest?.createdAt
+  );
 
   return (
-    <div className="min-h-screen bg-ink-900 py-10 px-2">
-      <div className="glass max-w-4xl mx-auto p-8 flex flex-col gap-4 shadow-glass">
-        {/* Countdown badge */}
+    <main className="min-h-screen bg-gradient-to-br from-ink-900 via-ink-800 to-ink-900 text-white py-10 px-3">
+      <div className="glass mx-auto max-w-5xl rounded-2xl shadow-glass p-6 md:p-8">
         <div className="mb-4">
           <KCSEBadge />
         </div>
 
-        <h2 className="text-3xl font-extrabold mb-1 text-gold-400">
-          👋 Welcome to Your BrainBot Dashboard
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-3xl md:text-4xl font-extrabold text-gold-500">
+            👋 Your BrainBot Dashboard
+          </h1>
+          <div className="text-xs md:text-sm text-steel-300">
+            {last ? `Last session: ${last}` : ""}
+          </div>
+        </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <span className="font-bold text-gray-300 mr-2">Plan:</span>
-            <span className="text-gold-400 font-bold">{userStats.plan}</span>
-          </div>
-          {/* If you’re using ExpiryCountdown, swap this span for the live component */}
-          <div className="text-sm text-gray-400">
-            <span>Expires: {userStats.expires}</span>
-          </div>
+        <div className="text-sm text-steel-300 mb-6">
+          Plan: <b className="text-gold-400">{plan}</b>{" "}
+          {!data?.linked && (
+            <span className="ml-2 text-rose-300">
+              (Not linked —{" "}
+              <Link href="/link" className="underline">
+                link your Telegram
+              </Link>
+              )
+            </span>
+          )}
         </div>
 
         {/* Stats row */}
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Papers Attempted */}
-          <div className="group rounded-xl glass-light p-5 text-center border border-gold-500/30 shadow-lg transition transform hover:scale-[1.02] hover:border-gold-400/60">
-            <div className="text-3xl font-extrabold text-gold-400">
-              {userStats.papersDone}
-            </div>
-            <div className="text-sm text-steel-300">Papers Attempted</div>
-          </div>
-
-          {/* Best Score */}
-          <div className="group rounded-xl glass-light p-5 text-center border border-emerald-400/30 shadow-lg transition transform hover:scale-[1.02] hover:border-emerald-300/60">
-            <div className="text-3xl font-extrabold text-emerald-400">
-              {userStats.bestScore}/100
-            </div>
-            <div className="text-sm text-steel-300">Best Score</div>
-          </div>
-
-          {/* Weak Topics */}
-          <div className="group rounded-xl glass-light p-5 text-center border border-rose-400/30 shadow-lg transition transform hover:scale-[1.02] hover:border-rose-300/60">
-            <div className="text-3xl font-extrabold text-rose-400 leading-tight">
-              {userStats.weakTopics.join(", ")}
-            </div>
-            <div className="text-sm text-steel-300">Weak Topics</div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard
+            title="Papers Attempted"
+            value={loading ? "—" : (data?.stats.papersDone ?? 0)}
+            valueClass="text-gold-400"
+          />
+          <StatCard
+            title="Best Score"
+            value={loading ? "—" : `${data?.stats.bestScore ?? 0}/100`}
+            valueClass="text-emerald-400"
+          />
+          <StatCard
+            title="Weak Topics"
+            value={loading ? "Loading…" : weak}
+            valueClass="text-rose-400 leading-tight"
+          />
         </div>
 
-        {/* Actions */}
-        <div className="mt-6 flex flex-col md:flex-row gap-4">
-          {/* Primary → Telegram handoff via /session */}
-          <Link
-            href="/session?plan=free"
-            className="flex-1 rounded-2xl px-6 py-4 text-base font-bold bg-gold-500 text-ink-900 hover:bg-gold-400 active:scale-95 transition shadow"
-          >
-            Start Full KCSE Paper
-          </Link>
-
-          {/* Drill → Telegram handoff page */}
-          <Link
-            href="/drill-topic?plan=free"
-            className="flex-1 rounded-2xl px-6 py-4 text-base font-bold bg-gold-500 text-ink-900 hover:bg-gold-400 active:scale-95 transition shadow"
-          >
-            Drill by Topic
-          </Link>
+        {/* Latest snapshot strip */}
+        <div className="mt-8 rounded-2xl bg-white/[0.03] border border-white/10 p-6">
+          {loading ? (
+            <div className="animate-pulse text-steel-300">
+              Loading latest report…
+            </div>
+          ) : data?.latest ? (
+            <>
+              <div className="font-bold text-gold-400 text-lg mb-1">
+                Latest Report
+              </div>
+              <div className="text-sm text-steel-300">
+                {data.latest.subjectLabel} — {data.latest.gradeNumeric}/100 (
+                {data.latest.gradeText})
+              </div>
+              {latestFinish && (
+                <div className="text-xs text-steel-300 mt-1">
+                  Finished: {latestFinish}
+                </div>
+              )}
+              <div className="mt-4">
+                <a
+                  href="/session?plan=free"
+                  className="rounded-2xl px-6 py-3 text-base font-bold bg-gold-500 text-ink-900 hover:bg-gold-400 inline-block"
+                >
+                  Start Another Paper
+                </a>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-bold text-gold-400 text-lg mb-2">
+                No reports yet
+              </div>
+              <div className="text-sm text-steel-300 mb-3">
+                Kick off a full KCSE paper to see analytics here.
+              </div>
+              <Link href="/session?plan=free" className="underline text-mint-400">
+                Start Free 3-Hour Session
+              </Link>
+            </>
+          )}
         </div>
 
-        {/* Upgrade notice */}
-        {showUpgrade && (
-          <div className="rounded-xl px-6 py-6 mt-7 flex flex-col items-center text-center bg-gold-500 text-ink-900 shadow-lg">
-            <div className="font-bold text-lg mb-2">
-              🚨 Upgrade for More Features & Unlimited Papers!
-            </div>
-            <div className="text-sm mb-3">
-              Unlock audio uploads, PDF export, extra hours, and access to all tiers.
-            </div>
-            <Link href="/#pricing" className="underline font-bold">
-              See Plans & Pay Now
-            </Link>
-            <button
-              onClick={() => setShowUpgrade(false)}
-              className="mt-2 text-xs text-gray-800 hover:underline"
-            >
-              Hide
-            </button>
+        {/* Filters */}
+        <div className="mt-6">
+          <FilterBar
+            availableSubjects={subjects}
+            selectedSubjects={selectedSubjects}
+            compare={compare}
+            range={range}
+            onChange={(next) => {
+              if (next.selectedSubjects !== undefined)
+                setSelectedSubjects(next.selectedSubjects);
+              if (next.compare !== undefined) setCompare(next.compare);
+              if (next.range !== undefined) setRange(next.range);
+            }}
+          />
+        </div>
+
+        {/* Charts */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <TrendLine
+            wid={wid}
+            selectedSubjects={selectedSubjects}
+            compare={compare}
+            range={range}
+          />
+          <TopicHeatmap wid={wid} selectedSubjects={selectedSubjects} />
+        </div>
+
+        {/* Upgrade strip */}
+        <div className="mt-6 rounded-2xl bg-white/[0.03] border border-white/10 p-6 text-center">
+          <div className="font-bold text-gold-400 text-lg mb-2">
+            Upgrade for Unlimited Papers & Extras
           </div>
-        )}
+          <div className="text-sm text-steel-300 mb-3">
+            Unlock audio uploads, PDF export, extra hours, and access to all tiers.
+          </div>
+          <a href="/#pricing" className="underline text-mint-400">
+            See Plans & Pay Now
+          </a>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

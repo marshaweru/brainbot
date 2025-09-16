@@ -4,3 +4,5 @@ export { PLANS, PLAN_LABELS, PLAN_PRICES_KES, PLAN_LIMITS, planFromAmount, getUs
 export { SUBJECTS } from "./subjects.js";
 export * from "./markingPrompt.js";
 export * from "./types.js";
+// ✅ expose shared DB index helper
+export * from "./db/ensureIndexes.js";

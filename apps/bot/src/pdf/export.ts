@@ -1,27 +1,27 @@
 // apps/bot/src/pdf/export.ts
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import type { Feedback } from "../feedback/render";
 import { Buffer } from "node:buffer";
 
 export type Brand = {
-  bg: string;       // page background
-  card: string;     // card surface
-  text: string;     // primary text
-  muted: string;    // secondary text
-  primary: string;  // accent (CTA yellow)
-  accent: string;   // secondary accent (purple)
+  bg: string;
+  card: string;
+  text: string;
+  muted: string;
+  primary: string;
+  accent: string;
   success: string;
   danger: string;
 };
 
-// Web palette (tweak to match exactly what you use on web)
 export const BRAND: Brand = {
   bg: "#0b1220",
   card: "#111827",
   text: "#e5e7eb",
   muted: "#9ca3af",
-  primary: "#facc15", // yellow
-  accent: "#8b5cf6",  // purple
+  primary: "#facc15",
+  accent: "#8b5cf6",
   success: "#22c55e",
   danger: "#ef4444",
 };
@@ -32,63 +32,76 @@ export async function buildPdfBuffer(
 ): Promise<Buffer> {
   const html = template(feedback, brand);
 
+  // Resolve Chromium path (env overrides package path if provided)
+  const executablePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH || (await chromium.executablePath());
+
   const browser = await puppeteer.launch({
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    // headless mode is default; explicitly set if needed:
-    // headless: "new",
-    // For serverless/docker environments, you often need:
-    // args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    executablePath,
+    args: chromium.args,          // safe defaults for serverless/Render
+    // headless/defaultViewport not referenced from chromium types → omit here
+    headless: true,               // explicit boolean keeps TS happy
   });
 
+  let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
   try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    page = await browser.newPage();
+    await page.setViewport({ width: 1080, height: 1520, deviceScaleFactor: 2 });
+    await page.emulateMediaType("screen");
+    await page.setContent(html, { waitUntil: "networkidle0", timeout: 60_000 });
 
-    // Puppeteer v22+ returns Uint8Array; older returns Buffer.
     const pdfBytes = await page.pdf({
       format: "A4",
       printBackground: true,
       margin: { top: "20mm", right: "16mm", bottom: "20mm", left: "16mm" },
+      preferCSSPageSize: true,
     });
 
-    const buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
-    return buf;
+    return Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
   } finally {
+    try { await page?.close(); } catch {}
     await browser.close();
   }
 }
 
 function template(fb: Feedback, c: Brand): string {
-  const sectionRows = fb.sections
+  const sections = Array.isArray(fb.sections) ? fb.sections : [];
+  const weak = Array.isArray(fb.weakTopics) ? fb.weakTopics : [];
+  const rubric = Array.isArray(fb.rubric) ? fb.rubric : [];
+
+  const sectionRows = sections
     .map(
       (s) => `
       <tr>
-        <td>${esc(s.section)}</td>
-        <td class="num">${s.score}</td>
-        <td class="num">${s.outOf}</td>
+        <td>${esc(s.section || "")}</td>
+        <td class="num">${num(s.score)}</td>
+        <td class="num">${num(s.outOf)}</td>
       </tr>`
     )
     .join("");
 
   const weakRows =
-    fb.weakTopics.length === 0
+    weak.length === 0
       ? `<li>None — keep it up ✨</li>`
-      : fb.weakTopics
-          .map((w) => `<li><b>${esc(w.topic)}:</b> ${esc(w.tip)}</li>`)
-          .join("");
+      : weak.map((w) => `<li><b>${esc(w.topic || "")}:</b> ${esc(w.tip || "")}</li>`).join("");
 
-  const rubricCols = Math.max(1, ...fb.rubric.map((r) => r.levels.length));
+  const rubricCols = Math.max(1, ...rubric.map((r) => (Array.isArray(r.levels) ? r.levels.length : 0)));
   const rubricHead =
     `<th>Criterion</th>` +
     Array.from({ length: rubricCols }, (_, i) => `<th>Level ${i + 1}</th>`).join("");
-  const rubricRows = fb.rubric
-    .map(
-      (r) =>
-        `<tr><td>${esc(r.criterion)}</td>${r.levels
-          .map((x) => `<td>${esc(x)}</td>`)
-          .join("")}</tr>`
-    )
+  const rubricRows = rubric
+    .map((r) => {
+      const levels = Array.isArray(r.levels) ? r.levels : [];
+      const cells = levels.map((x) => `<td>${esc(String(x ?? ""))}</td>`).join("");
+      return `<tr><td>${esc(r.criterion || "")}</td>${cells}</tr>`;
+    })
     .join("");
+
+  const totalScore = num(fb.totalScore);
+  const outOf = num(fb.outOf);
+  const grade = esc(fb.grade || "");
+  const subject = esc(fb.subject || "");
+  const paper = esc(fb.paper || "");
 
   return `<!doctype html>
 <html>
@@ -128,6 +141,7 @@ function template(fb: Feedback, c: Brand): string {
   th { text-align: left; color: var(--muted); font-weight: 600; }
   td.num { text-align: right; font-feature-settings: "tnum"; }
   .badge { background: rgba(250,204,21,.12); color: var(--primary); padding: 4px 8px; border-radius: 999px; display: inline-block; font-weight: 700; }
+  .badge-grade { color:#fff; background: var(--accent); }
   .footer { color: var(--muted); font-size: 11px; text-align: center; margin-top: 10px; }
 </style>
 </head>
@@ -135,10 +149,10 @@ function template(fb: Feedback, c: Brand): string {
   <div class="card">
     <h1>📘 Examiner Feedback</h1>
     <div class="kpis">
-      <div class="kpi"><b>Subject:</b> ${esc(fb.subject)}</div>
-      <div class="kpi"><b>Paper:</b> ${esc(fb.paper)}</div>
-      <div class="kpi"><b>Score:</b> <span class="badge">${fb.totalScore}/${fb.outOf}</span></div>
-      <div class="kpi"><b>Grade:</b> <span class="badge" style="color:#fff;background:var(--accent)">${esc(fb.grade)}</span></div>
+      <div class="kpi"><b>Subject:</b> ${subject}</div>
+      <div class="kpi"><b>Paper:</b> ${paper}</div>
+      <div class="kpi"><b>Score:</b> <span class="badge">${totalScore}/${outOf}</span></div>
+      <div class="kpi"><b>Grade:</b> <span class="badge badge-grade">${grade}</span></div>
     </div>
   </div>
 
@@ -169,5 +183,9 @@ function template(fb: Feedback, c: Brand): string {
 }
 
 function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function num(n: unknown) {
+  const x = Number(n);
+  return Number.isFinite(x) ? x : 0;
 }

@@ -4,3 +4,4 @@ export { SUBJECTS } from "./subjects.js";
 export type { SubjectSlug, SubjectLabel, SubjectName } from "./subjects.js";
 export * from "./markingPrompt.js";
 export * from "./types.js";
+export * from "./db/ensureIndexes.js";

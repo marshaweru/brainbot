@@ -19,7 +19,6 @@ export function planFromAmount(
   return PRICES[amount] ?? null;
 }
 
-/** Ensure a plan doc exists; return the persisted doc. */
 export async function getUserPlan(telegramId: string) {
   await connectMongo();
   const doc = await UserPlanModel.findOneAndUpdate(
@@ -30,7 +29,6 @@ export async function getUserPlan(telegramId: string) {
         tier: "free",
         expiresAt: new Date(Date.now() + FREE_TRIAL_HOURS * 3600 * 1000),
         papersUsed: 0,
-        // lastSession intentionally omitted (avoids null-type mismatch)
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }

@@ -17,3 +17,7 @@ export type { SubjectSlug, SubjectLabel, SubjectName } from "./subjects.js";
 
 export * from "./markingPrompt.js";
 export * from "./types.js";
+
+
+// ✅ expose shared DB index helper
+export * from "./db/ensureIndexes.js";

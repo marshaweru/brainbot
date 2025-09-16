@@ -1,30 +1,35 @@
 // apps/bot/src/feedback/adapter.ts
-import type { Feedback } from "./render";
+// Adapter: turn RawMarking (from marking.ts) into a normalized shape the repo uses.
 
 export type RawMarking = {
-  paper: string;
-  subject: string;
-  total: number;
+  score: number;
   outOf: number;
-  grade: string;
-  breakdown: { name: string; score: number; max: number }[];
-  weak: { topic: string; tip: string }[];
-  rubric: { criterion: string; levels: string[] }[];
+  remarks: string;
+  weakTopics: Array<{ topic: string; tip?: string }>;
 };
 
-export function toFeedback(raw: RawMarking): Feedback {
+export async function toFeedback(raw: RawMarking) {
   return {
-    paper: raw.paper,
-    subject: raw.subject,
-    totalScore: raw.total,
+    score: raw.score,
     outOf: raw.outOf,
-    grade: raw.grade,
-    sections: raw.breakdown.map((b) => ({
-      section: b.name,
-      score: b.score,
-      outOf: b.max,
-    })),
-    weakTopics: raw.weak.map((w) => ({ topic: w.topic, tip: w.tip })),
-    rubric: raw.rubric,
+    grade: gradeFromPct(raw.score, raw.outOf),
+    weakTopics: raw.weakTopics,
+    remarks: raw.remarks,
   };
+}
+
+function gradeFromPct(score: number, outOf: number) {
+  const pct = outOf > 0 ? (score / outOf) * 100 : 0;
+  if (pct >= 80) return "A";
+  if (pct >= 75) return "A-";
+  if (pct >= 70) return "B+";
+  if (pct >= 65) return "B";
+  if (pct >= 60) return "B-";
+  if (pct >= 55) return "C+";
+  if (pct >= 50) return "C";
+  if (pct >= 45) return "C-";
+  if (pct >= 40) return "D+";
+  if (pct >= 35) return "D";
+  if (pct >= 30) return "D-";
+  return "E";
 }

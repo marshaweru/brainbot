@@ -1,0 +1,1 @@
+// Guardian model placeholder

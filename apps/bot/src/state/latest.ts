@@ -1,12 +1,21 @@
 // apps/bot/src/state/latest.ts
-import type { Feedback } from "../feedback/render";
+type Latest = {
+  score?: number;
+  gradeText?: string;
+  weakTopics?: string[];
+  remarks?: string;
+  subjectLabel?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  plan?: "free" | "lite" | "steady" | "serious" | "elite";
+};
 
-const LATEST = new Map<string, Feedback>();
+const cache = new Map<string, Latest>();
 
-export function setLatestFeedback(uid: string, fb: Feedback) {
-  LATEST.set(uid, fb);
+export function setLatestFeedback(telegramId: string | number, data: Latest) {
+  cache.set(String(telegramId), { ...(cache.get(String(telegramId)) || {}), ...data });
 }
 
-export function getLatestFeedback(uid: string): Feedback | null {
-  return LATEST.get(uid) ?? null;
+export function getLatestFeedback(telegramId: string | number): Latest | null {
+  return cache.get(String(telegramId)) || null;
 }

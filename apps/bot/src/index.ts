@@ -1,347 +1,240 @@
+// apps/bot/src/index.ts
 import "dotenv/config";
+import express from "express";
+import cors from "cors";
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 
-import { SUBJECTS, subjectByNumber } from "./subjects";
-import { registerExportPdf } from "./handlers/export-pdf";
-import { toFeedback } from "./feedback/adapter";
-import { buildFeedbackMessage, type Feedback } from "./feedback/render";
-import { saveFeedback } from "./repo/feedbackRepo";
+import { registerStart } from "./handlers/start";                  // /start st_<jwt> (JWT link)
+import { registerSessionStart } from "./handlers/session-start";   // /session + subject pick + timers + paper
+import { registerUploads } from "./handlers/uploads";              // photo/voice/document/text with window rules
+import { registerSessionFinish } from "./handlers/session-finish"; // /finish → marking + feedback + pdf + notes/drills
+import { registerRemark } from "./handlers/remark";                // /remark <sessionId> (re-mark past session)
+import { registerExportPdf } from "./handlers/export-pdf";         // /pdf
+import { registerNotesHandlers } from "./handlers/notes";          // /notes
+import { registerDrillHandlers } from "./handlers/drills";         // /drill
+import { registerStatsHandlers } from "./handlers/stats";          // /stats
+import { registerInsightsHandlers } from "./handlers/insights";    // /insights
 
-import {
-  loadSession,
-  setSession,
-  addUpload,
-  clearSession,
-  type Upload,            // 👈 fixes “Cannot find name 'Upload'”
-} from "./repo/sessionRepo";
+import { planFromAmount } from "./repo/planRepo";
+import { stkPush, toMSISDN } from "./lib/mpesa";
+import { notifyAdmin } from "./lib/notify";
+import { watchUploadCleaner } from "./services/upload-cleaner";
 
 import { connectMongo } from "./db/mongo";
+import { SessionModel } from "./models/Session";
 
-import { handleMarking } from "./marking";
+// --- NEW: MPESA routes (Express) ------------------------------------------
+import { router as stkInitiateRouter } from "./routes/mpesa/stk-initiate";
+import { router as c2bConfirmRouter } from "./routes/mpesa/c2b-confirmation";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is not set");
 
+// Optional: server port for Express
+const PORT = Number(process.env.PORT || process.env.BOT_PORT || 8080);
+
+// ----------------- Telegraf Bot -----------------
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.catch((err, ctx) => {
   console.error("❌ Bot error for update", ctx?.update?.update_id, err);
 });
 
+// Core handlers
+registerStart(bot);
+registerSessionStart(bot);
+registerUploads(bot);
+registerSessionFinish(bot);
+registerRemark(bot);
 registerExportPdf(bot);
+registerNotesHandlers(bot);
+registerDrillHandlers(bot);
+registerStatsHandlers(bot);
+registerInsightsHandlers(bot);
 
+// ----------------- Payments / Upgrade UX (Bot-side) -----------------
 const escHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const subjectsList = () =>
-  SUBJECTS.map((s) => `- <code>${s.idx}</code> ${escHtml(s.label)}`).join("\n");
+// who’s mid-checkout (amount/tier) waiting to share phone or type it
+const pendingCheckout = new Map<string, { amount: number; tier: string; at: number }>();
 
-// ---------- Feedback normalizer ----------
-type RawMarking = {
-  paper: string;
-  subject: string;
-  totalScore: number;
-  outOf: number;
-  grade: string;
-  sections: { section: string; score: number; outOf: number }[];
-  weakTopics: { topic: string; tip: string }[];
-  rubric: { criterion: string; levels: string[] }[];
-};
+bot.command("upgrade", async (ctx) => {
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback("Get Lite — KES 69", "buy:69")],
+    [Markup.button.callback("Get Steady — KES 499", "buy:499")],
+    [Markup.button.callback("Get Serious — KES 2,999", "buy:2999")],
+    [Markup.button.callback("Get Limited — KES 1,499", "buy:1499")],
+    [Markup.button.callback("Go Elite — KES 5,999", "buy:5999")],
+  ]);
 
-function toGrade(pct: number): string {
-  if (pct >= 80) return "A";
-  if (pct >= 75) return "A-";
-  if (pct >= 70) return "B+";
-  if (pct >= 65) return "B";
-  if (pct >= 60) return "B-";
-  if (pct >= 55) return "C+";
-  if (pct >= 50) return "C";
-  if (pct >= 45) return "C-";
-  if (pct >= 40) return "D+";
-  if (pct >= 35) return "D";
-  if (pct >= 30) return "D-";
-  return "E";
-}
-
-function normalizePipelineOutput(raw: any, subjectLabel?: string): RawMarking {
-  let sections: { section: string; score: number; outOf: number }[] = [];
-  let weakTopics: { topic: string; tip: string }[] = [];
-  let rubric: { criterion: string; levels: string[] }[] = [];
-
-  if (Array.isArray(raw?.sections)) {
-    sections = raw.sections.map((s: any, idx: number) => ({
-      section: String(s.name ?? s.section ?? `Section ${idx + 1}`),
-      score: Number(s.score ?? 0),
-      outOf: Number(s.outOf ?? 0),
-    }));
-  } else if (Array.isArray(raw?.questions)) {
-    const bucket = new Map<string, { score: number; outOf: number }>();
-    for (const q of raw.questions) {
-      const key = String(q.section ?? "Paper");
-      const cur = bucket.get(key) ?? { score: 0, outOf: 0 };
-      cur.score += Number(q.score ?? 0);
-      cur.outOf += Number(q.outOf ?? 0);
-      bucket.set(key, cur);
-      if (q.tip) {
-        weakTopics.push({
-          topic: String(q.topic ?? key),
-          tip: String(q.tip),
-        });
-      }
-    }
-    sections = Array.from(bucket.entries()).map(([section, v]) => ({
-      section,
-      score: v.score,
-      outOf: v.outOf,
-    }));
-  } else if (typeof raw?.score === "number" && typeof raw?.outOf === "number") {
-    sections = [{ section: "Paper", score: Number(raw.score), outOf: Number(raw.outOf) }];
-    if (raw.tip) weakTopics.push({ topic: "General", tip: String(raw.tip) });
-  }
-
-  if (Array.isArray(raw?.weakTopics)) {
-    weakTopics = raw.weakTopics.map((w: any) => ({
-      topic: String(w.topic ?? "Topic"),
-      tip: String(w.tip ?? ""),
-    }));
-  }
-
-  if (Array.isArray(raw?.rubric)) {
-    rubric = raw.rubric.map((r: any) => {
-      if (Array.isArray(r.levels)) {
-        return {
-          criterion: String(r.criterion ?? "Criterion"),
-          levels: r.levels.map((x: any) => String(x)),
-        };
-      }
-      const label =
-        (r.step && String(r.step)) ||
-        (r.criterion && String(r.criterion)) ||
-        "Criterion";
-      const mark =
-        r.mark != null
-          ? String(r.mark)
-          : r.correct != null
-          ? r.correct
-            ? "Correct"
-            : "Incorrect"
-          : "";
-      return { criterion: label, levels: [mark].filter(Boolean) };
-    });
-  }
-
-  const totalScore = sections.reduce((s, x) => s + x.score, 0);
-  const outOf = sections.reduce((s, x) => s + x.outOf, 0);
-  const pct = outOf > 0 ? (totalScore / outOf) * 100 : 0;
-
-  return {
-    paper: String(raw?.paper ?? "Paper 1"),
-    subject: String(subjectLabel ?? raw?.subject ?? "Subject"),
-    totalScore,
-    outOf,
-    grade: String(raw?.grade ?? toGrade(pct)),
-    sections,
-    weakTopics,
-    rubric,
-  };
-}
-
-// ---------- Commands ----------
-bot.start(async (ctx) => {
-  await ctx.reply(
-    `<b>Welcome to BrainBot!</b> 🚀
-Your KCSE exam trainer.
-• Start with a real KCSE paper.
-• Upload your answers (photo, voice, text, or scanned docs).
-• Get examiner feedback + PDF export.
-
-<b>3-hour free session</b> (all features unlocked).
-
-Type <code>/session</code> to begin.
-Or <code>/upgrade</code> to unlock more features.
-
-<b>Paybill:</b> 4168557
-<b>Account Name:</b> Rizzline Africa
-<b>Bill/Ref:</b> Your Telegram ID`,
-    { parse_mode: "HTML" }
+  await ctx.replyWithHTML(
+    `<b>Choose a plan and pay via M-PESA (STK push)</b>
+Paybill <b>4168557</b> • Ref = your Telegram ID`,
+    kb
   );
 });
 
-bot.command("session", async (ctx) => {
+bot.action(/^buy:(\d+)$/, async (ctx) => {
+  const amount = Number(ctx.match[1]);
+  const map = planFromAmount(amount);
+  if (!map) {
+    await ctx.answerCbQuery("Unknown amount. Ping support.");
+    await notifyAdmin(
+      `⚠️ Unknown pricing button pressed\n<b>User:</b> ${ctx.from?.id}\n<b>Amount:</b> KES ${amount}`
+    );
+    return;
+  }
+  const tier = map.tier;
   const uid = String(ctx.from?.id ?? "");
-  await setSession(uid, {
-    mode: "awaiting-subject",
-    startedAt: Date.now(),
-    subjectIndex: undefined,
-    subjectLabel: undefined,
-    uploads: [],
-  });
 
-  await ctx.reply(
-    `<b>Start your free 3-hour KCSE session!</b>
+  pendingCheckout.set(uid, { amount, tier, at: Date.now() });
 
-Pick a subject to attempt:
-${subjectsList()}
+  await ctx.answerCbQuery();
+  await ctx.replyWithHTML(
+    `You chose <b>${tier}</b> — KES <b>${amount.toLocaleString()}</b>.
 
-<i>Reply with the subject number.</i>`,
-    { parse_mode: "HTML" }
+Tap the button below to share your M-PESA number (recommended), or type it here in the format 07XXXXXXXX.`,
+    Markup.keyboard([
+      [Markup.button.contactRequest("📱 Share my M-PESA number")],
+      [Markup.button.text("Cancel")],
+    ])
+      .oneTime()
+      .resize()
   );
 });
 
+// Contact → STK push
+bot.on(message("contact"), async (ctx) => {
+  const uid = String(ctx.from?.id ?? "");
+  const pend = pendingCheckout.get(uid);
+  if (!pend) return;
+
+  const raw = (ctx.message as any).contact?.phone_number as string | undefined;
+  if (!raw) return;
+
+  let phone: string;
+  try {
+    phone = toMSISDN(raw);
+  } catch {
+    await ctx.reply("❌ That phone number looks invalid. Try again.");
+    await notifyAdmin(`⚠️ Invalid phone from user\n<b>User:</b> ${uid}\n<b>Raw:</b> ${raw}`);
+    return;
+  }
+
+  await ctx.reply("⚡ Sending STK push…", Markup.removeKeyboard());
+
+  try {
+    await stkPush({
+      amount: pend.amount,
+      phone,
+      accountRef: uid,
+      description: `BrainBot ${pend.tier}`,
+    });
+    await ctx.replyWithHTML(`✅ STK sent to <b>${phone}</b>. Approve on your phone.`);
+  } catch (e: any) {
+    const msg = e?.response?.data ? JSON.stringify(e.response.data) : String(e);
+    console.error("stkPush error:", msg);
+    await ctx.reply(
+      "❌ Could not send STK. Check your number and try again, or use Paybill 4168557 manually."
+    );
+    await notifyAdmin(
+      `💥 STK push FAILED\n<b>User:</b> ${uid}\n<b>Amount:</b> KES ${pend.amount}\n<b>Phone:</b> ${phone}\n<pre>${escHtml(
+        msg
+      ).slice(0, 2000)}</pre>`
+    );
+  } finally {
+    pendingCheckout.delete(uid);
+  }
+});
+
+// Text: handle typed phone ONLY when mid-checkout; otherwise let other handlers run
 bot.on(message("text"), async (ctx, next) => {
   const uid = String(ctx.from?.id ?? "");
-  const sess = await loadSession(uid);
   const text = (ctx.message as any).text?.trim() ?? "";
 
-  if (sess.mode === "awaiting-subject") {
-    const n = Number(text);
-    if (!Number.isInteger(n) || n < 1 || n > SUBJECTS.length) {
-      return ctx.reply("Please reply with a valid subject number from the list.");
+  const pend = pendingCheckout.get(uid);
+  if (pend && /^(\+?254|0|7)\d{8,9}$/.test(text)) {
+    let phone: string;
+    try {
+      phone = toMSISDN(text);
+    } catch {
+      await ctx.reply("❌ That phone number looks invalid. Try again.");
+      await notifyAdmin(`⚠️ Invalid typed phone\n<b>User:</b> ${uid}\n<b>Raw:</b> ${text}`);
+      return;
     }
 
-    const chosen = subjectByNumber(n);
-    if (!chosen) return ctx.reply("That number isn’t on the list. Try again.");
+    await ctx.reply("⚡ Sending STK push…", Markup.removeKeyboard());
 
-    await setSession(uid, {
-      mode: "in-progress",
-      subjectIndex: n - 1,
-      subjectLabel: chosen.label,
-    });
-
-    return ctx.reply(
-      `✅ <b>${escHtml(chosen.label)}</b> selected.
-
-<b>Send your answers now</b>:
-• <b>Photos</b> (handwritten pages)
-• <b>Voice notes</b> (explanations)
-• <b>Documents</b> (PDFs or images)
-• <b>Text</b> (typed answers)
-
-When done, type <code>/finish</code> to get examiner feedback.`,
-      { parse_mode: "HTML" }
-    );
+    try {
+      await stkPush({
+        amount: pend.amount,
+        phone,
+        accountRef: uid,
+        description: `BrainBot ${pend.tier}`,
+      });
+      await ctx.replyWithHTML(`✅ STK sent to <b>${phone}</b>. Approve on your phone.`);
+    } catch (e: any) {
+      const msg = e?.response?.data ? JSON.stringify(e.response.data) : String(e);
+      console.error("stkPush error:", msg);
+      await ctx.reply("❌ Could not send STK. Try again or pay to 4168557.");
+      await notifyAdmin(
+        `💥 STK push FAILED (typed)\n<b>User:</b> ${uid}\n<b>Amount:</b> ${pend.amount}\n<b>Phone:</b> ${phone}\n<pre>${escHtml(
+          msg
+        ).slice(0, 2000)}</pre>`
+      );
+    } finally {
+      pendingCheckout.delete(uid);
+    }
+    return;
   }
 
-  if (sess.mode === "in-progress" && !text.startsWith("/")) {
-    const u: Upload = { kind: "text", text };
-    await addUpload(uid, u);
-    return ctx.reply("📝 Saved your text answer ✅");
-  }
-
+  // Not a checkout phone → allow other handlers to process:
   return next();
 });
 
-bot.on(message("photo"), async (ctx) => {
-  const uid = String(ctx.from?.id ?? "");
-  const sess = await loadSession(uid);
-  if (sess.mode !== "in-progress") return;
+// ----------------- Express Server (for MPESA) -----------------
+const app = express();
+app.disable("x-powered-by");
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: "1mb" }));
 
-  const photos = (ctx.message as any).photo as Array<{
-    file_id: string;
-    file_unique_id: string;
-    width: number;
-    height: number;
-  }>;
-  const fileId = photos?.[photos.length - 1]?.file_id;
-  const caption = (ctx.message as any).caption as string | undefined;
+// Health
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-  if (!fileId) return ctx.reply("Couldn't read the photo. Try again.");
-  await addUpload(uid, { kind: "photo", fileId, caption });
-  await ctx.reply("🖼️ Photo saved ✅");
-});
+// Mount MPESA routes
+app.use("/mpesa/stk-initiate", stkInitiateRouter);
+app.use("/mpesa/c2b-confirmation", c2bConfirmRouter);
 
-bot.on(message("document"), async (ctx) => {
-  const uid = String(ctx.from?.id ?? "");
-  const sess = await loadSession(uid);
-  if (sess.mode !== "in-progress") return;
-
-  const doc = (ctx.message as any).document;
-  const fileId = doc?.file_id as string | undefined;
-  const mimeType = doc?.mime_type as string | undefined;
-  const caption = (ctx.message as any).caption as string | undefined;
-
-  if (!fileId) return ctx.reply("Couldn't read the document. Try again.");
-  await addUpload(uid, { kind: "document", fileId, mimeType, caption });
-  await ctx.reply("📄 Document saved ✅");
-});
-
-bot.on(message("voice"), async (ctx) => {
-  const uid = String(ctx.from?.id ?? "");
-  const sess = await loadSession(uid);
-  if (sess.mode !== "in-progress") return;
-
-  const voice = (ctx.message as any).voice;
-  const fileId = voice?.file_id as string | undefined;
-  const duration = voice?.duration as number | undefined;
-
-  if (!fileId) return ctx.reply("Couldn't read the voice note. Try again.");
-  await addUpload(uid, { kind: "voice", fileId, duration });
-  await ctx.reply("🎙️ Voice note saved ✅");
-});
-
-bot.command("finish", async (ctx) => {
-  const uid = String(ctx.from?.id ?? "");
-  const sess = await loadSession(uid);
-
-  if (sess.mode !== "in-progress" || sess.subjectIndex == null) {
-    return ctx.reply("No active session. Start with /session first.");
-  }
-
-  const payload = {
-    userId: uid,
-    subject: sess.subjectLabel,
-    uploads: sess.uploads,
-    startedAt: sess.startedAt,
-  };
-
-  await ctx.reply("🧪 Marking your paper…");
-
-  const pipelineRaw = await handleMarking(payload as any);
-  const raw: RawMarking = normalizePipelineOutput(pipelineRaw, sess.subjectLabel);
-  const feedback: Feedback = toFeedback(raw as any);
-
-  await saveFeedback(uid, feedback);
-
-  const msg = buildFeedbackMessage(feedback);
-  await ctx.reply(msg, { parse_mode: "HTML" });
-
-  await ctx.replyWithHTML(
-    `<b>Download full PDF</b> (with diagrams & highlights)`,
-    Markup.inlineKeyboard([[Markup.button.callback("📄 Export PDF", "export_pdf")]])
-  );
-
-  await clearSession(uid);
-});
-
-bot.command("upgrade", async (ctx) => {
-  await ctx.reply(
-    `<b>Upgrade to unlock more papers, hours, and features:</b>
-
-• Lite Pass: 1 day, 1/day — KES 69
-• Steady: 7 days, 1/day — KES 499
-• Serious Prep: 30 days, 2/day — KES 2,999
-• <b>Limited-Edition Prep Pass</b>: Only 1,499 (first 100)
-• Elite: 30 days, 4/day, unlimited hours — KES 5,999
-
-Pay via <b>M-PESA Paybill 4168557</b> (Ref: your Telegram ID).
-Type <code>/paid</code> once you have paid.`,
-    { parse_mode: "HTML" }
-  );
-});
-
+// ----------------- Bootstrap -----------------
 (async () => {
   try {
-    await connectMongo(); // show “✅ Mongo connected”
+    await connectMongo();
+
+    // Rely on schema-defined indexes only (prevents IndexOptionsConflict)
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    await Promise.allSettled([SessionModel.syncIndexes()]);
 
     const me = await bot.telegram.getMe();
     console.log(`🔑 Auth OK: @${me.username} (id ${me.id})`);
+
+    // start cleaner AFTER DB is ready, BEFORE launch
+    watchUploadCleaner();
+
+    // Start express server
+    app.listen(PORT, () => {
+      console.log(`🌐 HTTP server listening on :${PORT}`);
+      console.log(`   • POST /mpesa/stk-initiate   (protected by SERVICE_TOKEN)`);
+      console.log(`   • POST /mpesa/c2b-confirmation (Daraja callback)`);
+    });
+
+    // Start bot long polling
+    await bot.launch();
+    console.log("🚀 BrainBot Telegram bot running! Listening for updates…");
   } catch (err) {
     console.error("💥 startup error:", err);
   }
-
-  await bot.launch();
-  console.log("🚀 BrainBot Telegram bot running! Listening for updates…");
 })();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
