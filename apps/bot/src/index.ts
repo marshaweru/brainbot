@@ -199,6 +199,7 @@ const app = express();
 app.disable("x-powered-by");
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
+app.set("trust proxy", true);
 
 // Health
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
