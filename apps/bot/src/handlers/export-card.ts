@@ -10,7 +10,7 @@ export function registerExportCard(bot: Telegraf<Context>) {
     if (!fb) return ctx.reply("No recent session found. Do a paper first with /session.");
 
     await ctx.reply("Rendering your report card…");
-    const png = await buildReportCardPng(fb);
+    const png = await buildReportCardPng(fb as any);
     await ctx.replyWithPhoto({ source: Buffer.from(png) }, {
       caption: "🖼️ Share this with your classmates or teacher!",
       reply_markup: {
@@ -24,7 +24,8 @@ export function registerExportCard(bot: Telegraf<Context>) {
     const fb = getLatestFeedback(uid);
     if (!fb) return ctx.answerCbQuery("No recent session.");
     await ctx.answerCbQuery("Rendering…");
-    const png = await buildReportCardPng(fb);
+    const png = await buildReportCardPng(fb as any);
+
     await ctx.replyWithPhoto({ source: Buffer.from(png) }, {
       caption: "🖼️ Report card ready.",
       reply_markup: {

@@ -1,4 +1,4 @@
-import "./globals.css.js";
+import "./globals.css"; // 🔥 remove `.js`
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {

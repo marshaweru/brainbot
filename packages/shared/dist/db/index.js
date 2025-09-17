@@ -1,2 +1,2 @@
 // entrypoint for @brainbot/shared/db
-export * from "./ensureIndexes";
+export * from "./ensureIndexes.js";

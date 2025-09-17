@@ -1,6 +1,6 @@
 // apps/web/lib/telegram.ts
 // Resolve logged-in user → telegramId used by the bot/payments.
-import { db } from "./db.js";
+import { db } from "./db";   // 🔥 removed `.js`
 import { ObjectId } from "mongodb";
 
 export async function getUserTelegramId(userId: string): Promise<string | null> {
@@ -12,10 +12,16 @@ export async function getUserTelegramId(userId: string): Promise<string | null> 
   // Try by ObjectId, then by string id
   let doc = null;
   if (ObjectId.isValid(userId)) {
-    doc = await users.findOne({ _id: new ObjectId(userId) }, { projection: { telegramId: 1, wid: 1 } });
+    doc = await users.findOne(
+      { _id: new ObjectId(userId) },
+      { projection: { telegramId: 1, wid: 1 } }
+    );
   }
   if (!doc) {
-    doc = await users.findOne({ _id: userId } as any, { projection: { telegramId: 1, wid: 1 } });
+    doc = await users.findOne(
+      { _id: userId } as any,
+      { projection: { telegramId: 1, wid: 1 } }
+    );
   }
 
   // Common fields we’ve used: telegramId or wid

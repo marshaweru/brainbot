@@ -1,9 +1,9 @@
 import React from "react";
 import Link from "next/link";
-import PricingCards from "../components/PricingCards.js";
-import KCSEBadge from "../components/KCSEBadge.js";
+import PricingCards from "../components/PricingCards"; // 🔥 drop `.js`
+import KCSEBadge from "../components/KCSEBadge";       // 🔥 drop `.js`
 // import KCSECountdown from "../components/KCSECountdown"; // not used
-import ShareButtons from "../components/ShareButtons.js";
+import ShareButtons from "../components/ShareButtons"; // 🔥 drop `.js`
 
 export default function HomePage() {
   return (
@@ -45,7 +45,6 @@ export default function HomePage() {
 
           {/* CTA buttons (clean, no glow) */}
           <div className="flex gap-4 w-full mt-6 mb-6">
-            {/* 🔗 Point straight to the Telegram handoff */}
             <Link
               href="/session?plan=free"
               className="flex-1 rounded-2xl text-lg px-6 py-3 font-bold
@@ -65,7 +64,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          {/* Share buttons row — spaced below CTA */}
+          {/* Share buttons row */}
           <div className="mt-4">
             <ShareButtons />
           </div>

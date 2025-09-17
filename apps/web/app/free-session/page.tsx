@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import KCSEBadge from "../../components/KCSEBadge.js";
+import KCSEBadge from "../../components/KCSEBadge"; // 🔥 removed `.js`
 
 export default function FreeSessionPage() {
   return (
@@ -40,7 +40,7 @@ function StartBlock() {
         if (j?.wid) localStorage.setItem("brainbot:wid", j.wid);
         const st = j?.startParam || (j?.token ? `st_${j.token}` : "");
         setStartParam(st);
-      } catch (e) {
+      } catch {
         setError("Couldn’t prepare the session. Try again.");
       } finally {
         setLoading(false);
@@ -75,7 +75,9 @@ function StartBlock() {
 
       <div className="mt-6 text-sm text-steel-300">
         Prefer pairing by code?{" "}
-        <Link href="/link" className="underline text-mint-400">Use 6-digit code</Link>.
+        <Link href="/link" className="underline text-mint-400">
+          Use 6-digit code
+        </Link>.
       </div>
     </div>
   );

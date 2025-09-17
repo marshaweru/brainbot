@@ -1,31 +1,28 @@
-"use client";
+// apps/web/app/drill-topic/page.tsx
+const TG_BOT = "brainbotafrica_bot";
 
-import { useMemo } from "react";
-import { useSearchParams } from "next/navigation";
-
-const TG_BOT = "brainbotafrica_bot"; // your bot username
-
-// Optional: accept ?plan= to tag context, default to free
-const PLAN_KEYS: Record<string, string> = {
+const PLAN_KEYS = {
   free: "free",
   lite: "lite",
   steady: "steady",
   serious: "serious",
   elite: "elite",
   limited: "limited",
-};
+} as const;
 
-export default function DrillTopicHandoff() {
-  const sp = useSearchParams();
-  const plan = (sp.get("plan") || "free").toLowerCase();
-  const planKey = PLAN_KEYS[plan] ?? PLAN_KEYS.free;
+type PlanKey = keyof typeof PLAN_KEYS;
 
-  // Deep-link to drill mode; your bot should parse "drill_<plan>"
+export default function DrillTopicHandoff({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[]>;
+}) {
+  const raw = searchParams?.plan;
+  const plan = (Array.isArray(raw) ? raw[0] : raw ?? "free").toLowerCase();
+  const planKey = (PLAN_KEYS[plan as PlanKey] ?? PLAN_KEYS.free) as string;
+
   const startKey = `drill_${planKey}`;
-  const deepLink = useMemo(
-    () => `https://t.me/${TG_BOT}?start=${encodeURIComponent(startKey)}`,
-    [startKey]
-  );
+  const deepLink = `https://t.me/${TG_BOT}?start=${encodeURIComponent(startKey)}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-ink-900 via-ink-800 to-ink-900 text-white">

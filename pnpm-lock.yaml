@@ -149,6 +149,9 @@ importers:
       '@brainbot/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       echarts:
         specifier: ^5.6.0
         version: 5.6.0

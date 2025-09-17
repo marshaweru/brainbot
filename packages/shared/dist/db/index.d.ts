@@ -1,1 +1,1 @@
-export * from "./ensureIndexes";
+export * from "./ensureIndexes.js";

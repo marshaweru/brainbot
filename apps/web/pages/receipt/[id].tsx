@@ -48,7 +48,9 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
           receipt: row.receipt ?? null,
           checkoutId: row.checkoutId ?? null,
           txAt: row.txAt ? new Date(row.txAt).toISOString() : null,
-          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+          createdAt: row.createdAt
+            ? new Date(row.createdAt).toISOString()
+            : new Date().toISOString(),
         },
       },
     };
@@ -59,7 +61,11 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
 
 export default function ReceiptPage({ ok, error, receipt }: Props) {
   if (!ok || !receipt) {
-    return <main className="p-6"><p className="text-red-600">{error || "Error"}</p></main>;
+    return (
+      <main className="p-6">
+        <p className="text-red-600">{error || "Error"}</p>
+      </main>
+    );
   }
 
   const when = new Date(receipt.txAt || receipt.createdAt).toLocaleString();
@@ -75,15 +81,27 @@ export default function ReceiptPage({ ok, error, receipt }: Props) {
           <p className="text-sm opacity-80 mb-4">{when}</p>
 
           <dl className="space-y-2">
-            <Row label="Plan">{receipt.tier} ({receipt.days} days)</Row>
+            <Row label="Plan">
+              {receipt.tier} ({receipt.days} days)
+            </Row>
             <Row label="Amount">KES {receipt.amount}</Row>
             <Row label="M-PESA Receipt">{receipt.receipt ?? "—"}</Row>
             <Row label="Checkout ID">{receipt.checkoutId ?? "—"}</Row>
           </dl>
 
           <div className="mt-6 flex gap-3">
-            <button onClick={() => window.print()} className="rounded-xl border px-4 py-2 shadow-sm">Print</button>
-            <a href="/dashboard" className="rounded-xl border px-4 py-2 shadow-sm">Back to dashboard</a>
+            <button
+              onClick={() => window.print()}
+              className="rounded-xl border px-4 py-2 shadow-sm"
+            >
+              Print
+            </button>
+            <a
+              href="/dashboard"
+              className="rounded-xl border px-4 py-2 shadow-sm"
+            >
+              Back to dashboard
+            </a>
           </div>
         </div>
       </main>
