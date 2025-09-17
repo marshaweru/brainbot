@@ -1,7 +1,7 @@
 // apps/bot/src/services/pdf-export.ts
 import { Context } from "telegraf";
-import { getLatestFeedback } from "../state/latest";
-import { buildFeedbackPDF } from "./pdfkit-report";
+import { getLatestFeedback } from "../state/latest.js";
+import { buildFeedbackPDF } from "./pdfkit-report.js";
 
 export async function offerExportPdf(ctx: Context) {
   try {

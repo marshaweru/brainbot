@@ -1,7 +1,7 @@
 // apps/bot/src/pdf/export.ts
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
-import type { Feedback } from "../feedback/render";
+import type { Feedback } from "../feedback/render.js";
 import { Buffer } from "node:buffer";
 
 export type Brand = {

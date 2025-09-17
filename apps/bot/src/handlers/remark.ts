@@ -1,10 +1,10 @@
 import { Telegraf, Context } from "telegraf";
-import { markSessionAndSummarize } from "../repo/markingRepo";
-import { savePerformance } from "../repo/performanceRepo";
-import { buildFeedbackMessage } from "../feedback/render";
-import { offerExportPdf } from "../services/pdf-export";
-import { compileNotesForWeakTopics } from "../services/notes-service";
-import { SessionModel } from "../models/Session";
+import { markSessionAndSummarize } from "../repo/markingRepo.js";
+import { savePerformance } from "../repo/performanceRepo.js";
+import { buildFeedbackMessage } from "../feedback/render.js";
+import { offerExportPdf } from "../services/pdf-export.js";
+import { compileNotesForWeakTopics } from "../services/notes-service.js";
+import { SessionModel } from "../models/Session.js";
 
 /**
  * /remark <sessionId>

@@ -1,10 +1,10 @@
 // apps/bot/src/handlers/drills.ts
 import { Telegraf, Markup } from "telegraf";
-import { getDrill } from "../services/drill-engine";
-import { getOrGenerateInsight } from "../services/insights";
-import * as sessionRepo from "../repo/sessionRepo";
-import { SUBJECTS } from "../subjects";
-import * as drillsRepo from "../repo/drillsRepo";
+import { getDrill } from "../services/drill-engine.js";
+import { getOrGenerateInsight } from "../services/insights.js";
+import * as sessionRepo from "../repo/sessionRepo.js";
+import { SUBJECTS } from "../subjects.js";
+import * as drillsRepo from "../repo/drillsRepo.js";
 
 const DIFF_MAP = {
   easy:   { questions: 5,  level: 0 },

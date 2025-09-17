@@ -5,28 +5,28 @@ import cors from "cors";
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 
-import { registerStart } from "./handlers/start";                  // /start st_<jwt> (JWT link)
-import { registerSessionStart } from "./handlers/session-start";   // /session + subject pick + timers + paper
-import { registerUploads } from "./handlers/uploads";              // photo/voice/document/text with window rules
-import { registerSessionFinish } from "./handlers/session-finish"; // /finish → marking + feedback + pdf + notes/drills
-import { registerRemark } from "./handlers/remark";                // /remark <sessionId> (re-mark past session)
-import { registerExportPdf } from "./handlers/export-pdf";         // /pdf
-import { registerNotesHandlers } from "./handlers/notes";          // /notes
-import { registerDrillHandlers } from "./handlers/drills";         // /drill
-import { registerStatsHandlers } from "./handlers/stats";          // /stats
-import { registerInsightsHandlers } from "./handlers/insights";    // /insights
+import { registerStart } from "./handlers/start.js";                  // /start st_<jwt> (JWT link)
+import { registerSessionStart } from "./handlers/session-start.js";   // /session + subject pick + timers + paper
+import { registerUploads } from "./handlers/uploads.js";              // photo/voice/document/text with window rules
+import { registerSessionFinish } from "./handlers/session-finish.js"; // /finish → marking + feedback + pdf + notes/drills
+import { registerRemark } from "./handlers/remark.js";                // /remark <sessionId> (re-mark past session)
+import { registerExportPdf } from "./handlers/export-pdf.js";         // /pdf
+import { registerNotesHandlers } from "./handlers/notes.js";          // /notes
+import { registerDrillHandlers } from "./handlers/drills.js";         // /drill
+import { registerStatsHandlers } from "./handlers/stats.js";          // /stats
+import { registerInsightsHandlers } from "./handlers/insights.js";    // /insights
 
-import { planFromAmount } from "./repo/planRepo";
-import { stkPush, toMSISDN } from "./lib/mpesa";
-import { notifyAdmin } from "./lib/notify";
-import { watchUploadCleaner } from "./services/upload-cleaner";
+import { planFromAmount } from "./repo/planRepo.js";
+import { stkPush, toMSISDN } from "./lib/mpesa.js";
+import { notifyAdmin } from "./lib/notify.js";
+import { watchUploadCleaner } from "./services/upload-cleaner.js";
 
-import { connectMongo } from "./db/mongo";
-import { SessionModel } from "./models/Session";
+import { connectMongo } from "./db/mongo.js";
+import { SessionModel } from "./models/Session.js";
 
 // --- NEW: MPESA routes (Express) ------------------------------------------
-import { router as stkInitiateRouter } from "./routes/mpesa/stk-initiate";
-import { router as c2bConfirmRouter } from "./routes/mpesa/c2b-confirmation";
+import { router as stkInitiateRouter } from "./routes/mpesa/stk-initiate.js";
+import { router as c2bConfirmRouter } from "./routes/mpesa/c2b-confirmation.js";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is not set");

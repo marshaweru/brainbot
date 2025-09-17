@@ -1,8 +1,8 @@
 // apps/bot/src/handlers/notes.ts
 import { Telegraf } from "telegraf";
-import { getNotes } from "../repo/notesRepo";
-import * as sessionRepo from "../repo/sessionRepo";
-import { SUBJECTS } from "../subjects";
+import { getNotes } from "../repo/notesRepo.js";
+import * as sessionRepo from "../repo/sessionRepo.js";
+import { SUBJECTS } from "../subjects.js";
 
 function normalizeSubjectLabel(input?: string | null): string | null {
   if (!input) return null;

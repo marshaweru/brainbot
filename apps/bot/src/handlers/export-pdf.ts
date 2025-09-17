@@ -1,7 +1,7 @@
 // apps/bot/src/handlers/export-pdf.ts
 import { Telegraf, Context, Markup } from "telegraf";
-import { buildPdfBuffer } from "../pdf/export";
-import { getLatestFeedbackByTelegramId } from "../repo/feedbackRepo";
+import { buildPdfBuffer } from "../pdf/export.js";
+import { getLatestFeedbackByTelegramId } from "../repo/feedbackRepo.js";
 
 /**
  * Sends the user's latest examiner-style report as a PDF.

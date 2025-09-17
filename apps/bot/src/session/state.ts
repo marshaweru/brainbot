@@ -1,5 +1,5 @@
 // apps/bot/src/session/state.ts
-import { upsertSession, getSessionByTelegramId, clearSessionByTelegramId } from "../repo/sessionRepo";
+import { upsertSession, getSessionByTelegramId, clearSessionByTelegramId } from "../repo/sessionRepo.js";
 
 export type UploadKind = "photo" | "voice" | "document" | "text";
 export type Upload =

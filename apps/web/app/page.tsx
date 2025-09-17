@@ -1,9 +1,9 @@
 import React from "react";
 import Link from "next/link";
-import PricingCards from "../components/PricingCards";
-import KCSEBadge from "../components/KCSEBadge";
+import PricingCards from "../components/PricingCards.js";
+import KCSEBadge from "../components/KCSEBadge.js";
 // import KCSECountdown from "../components/KCSECountdown"; // not used
-import ShareButtons from "../components/ShareButtons";
+import ShareButtons from "../components/ShareButtons.js";
 
 export default function HomePage() {
   return (

@@ -1,5 +1,5 @@
 // apps/bot/src/repo/drillsRepo.ts
-import { DrillModel, DrillDoc } from "../models/Drill";
+import { DrillModel, DrillDoc } from "../models/Drill.js";
 
 /** Create & persist a served drill set. Returns the saved doc (lean). */
 export async function createDrill(params: {

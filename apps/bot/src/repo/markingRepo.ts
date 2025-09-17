@@ -1,11 +1,11 @@
 // apps/bot/src/repo/markingRepo.ts
-import { SessionModel } from "../models/Session";
-import { PerformanceModel } from "../models/Performance";
-import { handleMarking } from "../marking";            // your pipeline entry
-import { toFeedback } from "../feedback/adapter";      // your normalizer
-import { postSession } from "../services/postSession"; // HMAC → web /api/session-complete
-import { listUploadsBySession } from "./sessionRepo";
-import { upsertLatestFeedback } from "../repo/feedbackRepo";
+import { SessionModel } from "../models/Session.js";
+import { PerformanceModel } from "../models/Performance.js";
+import { handleMarking } from "../marking.js";            // your pipeline entry
+import { toFeedback } from "../feedback/adapter.js";      // your normalizer
+import { postSession } from "../services/postSession.js"; // HMAC → web /api/session-complete
+import { listUploadsBySession } from "./sessionRepo.js";
+import { upsertLatestFeedback } from "../repo/feedbackRepo.js";
 
 
 type Plan = "free" | "lite" | "steady" | "serious" | "elite";

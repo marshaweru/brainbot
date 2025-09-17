@@ -1,6 +1,6 @@
 // apps/bot/src/services/analytics.ts
-import { listRecent } from "../repo/performanceRepo";
-import { SUBJECTS } from "../subjects";
+import { listRecent } from "../repo/performanceRepo.js";
+import { SUBJECTS } from "../subjects.js";
 
 export type TrendPoint = {
   date: string;          // ISO yyyy-mm-dd

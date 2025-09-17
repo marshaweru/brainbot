@@ -1,10 +1,10 @@
 // apps/bot/src/handlers/session-finish.ts
 import { Telegraf } from "telegraf";
-import * as sessionRepo from "../repo/sessionRepo";
-import { markSessionAndSummarize } from "../repo/markingRepo";
-import { buildFeedbackMessage } from "../feedback/render";
-import { offerExportPdf } from "../services/pdf-export";
-import { compileNotesForWeakTopics } from "../services/notes-service";
+import * as sessionRepo from "../repo/sessionRepo.js";
+import { markSessionAndSummarize } from "../repo/markingRepo.js";
+import { buildFeedbackMessage } from "../feedback/render.js";
+import { offerExportPdf } from "../services/pdf-export.js";
+import { compileNotesForWeakTopics } from "../services/notes-service.js";
 
 export function registerSessionFinish(bot: Telegraf) {
   bot.command("finish", async (ctx) => {

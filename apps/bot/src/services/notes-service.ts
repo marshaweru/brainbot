@@ -1,5 +1,5 @@
 // apps/bot/src/services/notes-service.ts
-import { getNotes } from "../repo/notesRepo";
+import { getNotes } from "../repo/notesRepo.js";
 
 /**
  * Prepares notes for a set of weak topics so follow-up commands feel instant.

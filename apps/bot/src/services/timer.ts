@@ -1,16 +1,16 @@
 // apps/bot/src/services/timer.ts
-import { Context } from "telegraf";
-import { SessionModel } from "../models/Session";
+import type { Context } from "telegraf";
+import { SessionModel } from "../models/Session.js";
 
 type DurationPreset = "2h" | "2h30"; // exam window length (upload buffer is always +30m)
 
 /**
- * Resolve exam duration by subject/paper (you can change this mapping later).
+ * Resolve exam duration by subject/paper (adjust mapping as needed).
  * - Most papers: 2h
  * - Some papers: 2h30 (e.g., certain essays/compositions)
  */
 export function resolveExamPreset(subjectLabel?: string, paper?: 1 | 2 | 3): DurationPreset {
-  const s = (subjectLabel || "").toLowerCase();
+  const s = (subjectLabel ?? "").toLowerCase();
 
   // Example heuristics — tweak to your rules:
   // English Paper 1/2, Kiswahili Insha/Comprehension often run longer
@@ -26,11 +26,9 @@ export function resolveExamPreset(subjectLabel?: string, paper?: 1 | 2 | 3): Dur
 function msForPreset(preset: DurationPreset) {
   return preset === "2h30" ? 2.5 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000;
 }
-
 function ms30m() {
   return 30 * 60 * 1000;
 }
-
 function inMs(ms: number) {
   return new Date(Date.now() + ms);
 }
@@ -41,7 +39,7 @@ function inMs(ms: number) {
  * - uploadEndsAt = examEndsAt + 30m
  * - expiresAt = uploadEndsAt (legacy field still used elsewhere)
  *
- * We schedule reminders:
+ * Schedules reminders:
  *  - Halfway of EXAM window
  *  - 10 min left of EXAM window
  *  - Upload window started (immediately when exam ends)
@@ -65,17 +63,19 @@ export async function startSessionTimer(
     { _id: sessionId },
     {
       $set: {
-        examPreset: preset,           // if your schema is strict, add these fields there
+        examPreset: preset,
         examEndsAt,
         uploadEndsAt,
-        expiresAt,                    // keep legacy for anything else using it
+        expiresAt, // keep legacy for anything else using it
       },
     }
   );
 
-  // Schedule EXAM reminders
+  // EXAM reminders
   scheduleAt(examMs / 2, () => safeReply(ctx, "⏳ Halfway! Keep going."));
-  scheduleAt(Math.max(examMs - 10 * 60 * 1000, 0), () => safeReply(ctx, "⚠️ 10 minutes left in the exam window."));
+  scheduleAt(Math.max(examMs - 10 * 60 * 1000, 0), () =>
+    safeReply(ctx, "⚠️ 10 minutes left in the exam window.")
+  );
 
   // Transition to UPLOAD window
   scheduleAt(examMs, async () => {
@@ -96,7 +96,7 @@ export async function startSessionTimer(
 }
 
 /**
- * Helper to compute remaining time buckets for UI or guards.
+ * Compute remaining time buckets for UI or guards.
  * Returns ms left in each window (0 if passed).
  */
 export async function getTimeLeft(sessionId: string) {
@@ -107,25 +107,28 @@ export async function getTimeLeft(sessionId: string) {
   return { examLeft, uploadLeft };
 }
 
-/**
- * Convenience checks you can use in handlers:
- */
+/** Convenience checks you can use in handlers */
 export async function isExamOpen(sessionId: string) {
   const s = await SessionModel.findById(sessionId).lean();
   return s?.examEndsAt ? Date.now() < new Date(s.examEndsAt).getTime() : false;
 }
-
 export async function isUploadOpen(sessionId: string) {
   const s = await SessionModel.findById(sessionId).lean();
   return s?.uploadEndsAt ? Date.now() < new Date(s.uploadEndsAt).getTime() : false;
 }
 
+/** Timer helper: ensure we don't call .catch on a void */
 function scheduleAt(delayMs: number, fn: () => void | Promise<void>) {
   if (delayMs <= 0) return;
-  setTimeout(() => void fn().catch(console.error), delayMs);
+  setTimeout(() => {
+    Promise.resolve(fn()).catch(console.error);
+  }, delayMs);
 }
 
 async function safeReply(ctx: Context, text: string) {
-  try { await ctx.reply(text); } catch (e) { console.error("timer reply failed:", e); }
+  try {
+    await ctx.reply(text);
+  } catch (e) {
+    console.error("timer reply failed:", e);
+  }
 }
-// timer placeholder

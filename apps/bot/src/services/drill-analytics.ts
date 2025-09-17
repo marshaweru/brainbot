@@ -1,5 +1,5 @@
 // apps/bot/src/services/drill-analytics.ts
-import { listRecent } from "../repo/drillsRepo";
+import { listRecent } from "../repo/drillsRepo.js";
 
 export type DrillTrendPoint = {
   date: string;   // ISO yyyy-mm-dd

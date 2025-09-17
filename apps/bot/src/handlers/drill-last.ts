@@ -1,8 +1,8 @@
 // apps/bot/src/handlers/drill-last.ts
 import { Telegraf } from "telegraf";
-import * as drillsRepo from "../repo/drillsRepo";
-import * as sessionRepo from "../repo/sessionRepo";
-import { SUBJECTS } from "../subjects";
+import * as drillsRepo from "../repo/drillsRepo.js";
+import * as sessionRepo from "../repo/sessionRepo.js";
+import { SUBJECTS } from "../subjects.js";
 
 function normalizeSubjectLabel(input?: string | null): string | null {
   if (!input) return null;

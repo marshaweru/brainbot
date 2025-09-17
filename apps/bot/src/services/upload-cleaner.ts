@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { Types } from "mongoose";
-import { SessionModel } from "../models/Session";
+import { SessionModel } from "../models/Session.js";
 
 /** Delete a folder recursively (safe). */
 function rmDirRecursive(dir: string) {

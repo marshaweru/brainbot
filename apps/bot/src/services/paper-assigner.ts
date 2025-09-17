@@ -1,6 +1,6 @@
 // apps/bot/src/services/paper-assigner.ts
-import { KCSESubject, PaperMeta } from "../models/Paper";
-import { getNextPaper } from "../repo/papersRepo";
+import { KCSESubject, PaperMeta } from "../models/Paper.js";
+import { getNextPaper } from "../repo/papersRepo.js";
 
 /**
  * Assign the next paper for a given subject.

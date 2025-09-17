@@ -1,6 +1,6 @@
 // apps/web/lib/telegram.ts
 // Resolve logged-in user → telegramId used by the bot/payments.
-import { db } from "./db";
+import { db } from "./db.js";
 import { ObjectId } from "mongodb";
 
 export async function getUserTelegramId(userId: string): Promise<string | null> {

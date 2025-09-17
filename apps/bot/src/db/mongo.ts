@@ -1,7 +1,7 @@
 // apps/bot/src/db/mongo.ts
 import mongoose from "mongoose";
-import { SessionModel } from "../models/Session";
-import { PerformanceModel } from "../models/Performance";
+import { SessionModel } from "../models/Session.js";
+import { PerformanceModel } from "../models/Performance.js";
 // import { UserPlanModel } from "../models/UserPlan"; // uncomment if you’ve defined it
 
 let pending: Promise<typeof mongoose> | null = null;

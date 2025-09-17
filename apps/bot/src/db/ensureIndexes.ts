@@ -1,7 +1,7 @@
 // apps/bot/src/db/ensureIndexes.ts
 import mongoose from "mongoose";
-import { SessionModel } from "../models/Session";
-import { PerformanceModel } from "../models/Performance";
+import { SessionModel } from "../models/Session.js";
+import { PerformanceModel } from "../models/Performance.js";
 
 /** Create an index but quietly ignore conflicts/duplicates. */
 async function safeCreateIndex(

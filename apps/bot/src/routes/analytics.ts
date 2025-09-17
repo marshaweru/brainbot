@@ -1,7 +1,7 @@
 // apps/bot/src/routes/analytics.ts
 import { Router } from "express";
-import { buildUserStats, buildTopSubjects } from "../services/analytics";
-import { listRecent as listRecentDrills } from "../repo/drillsRepo";
+import { buildUserStats, buildTopSubjects } from "../services/analytics.js";
+import { listRecent as listRecentDrills } from "../repo/drillsRepo.js";
 
 const router = Router();
 

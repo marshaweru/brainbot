@@ -1,7 +1,7 @@
 // apps/bot/src/routes/mpesa/c2b-confirmation.ts
 import express, { type Request, type Response } from "express";
 import mongoose from "mongoose";
-import { planFromAmount, upgradeUserPlan } from "../../repo/planRepo";
+import { planFromAmount, upgradeUserPlan } from "../../repo/planRepo.js";
 
 export const router = express.Router();
 

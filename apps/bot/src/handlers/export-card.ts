@@ -1,7 +1,7 @@
 // apps/bot/src/handlers/export-card.ts
 import { Telegraf, Context, Markup } from "telegraf";
-import { buildReportCardPng } from "../image/report-card";
-import { getLatestFeedback } from "../state/latest";
+import { buildReportCardPng } from "../image/report-card.js";
+import { getLatestFeedback } from "../state/latest.js";
 
 export function registerExportCard(bot: Telegraf<Context>) {
   bot.command("card", async (ctx) => {

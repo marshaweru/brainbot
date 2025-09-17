@@ -1,6 +1,6 @@
 // apps/bot/src/feedback/render.ts
-import { html } from "../utils/format";
-import { monoGrid } from "../utils/grid";
+import { html } from "../utils/format.js";
+import { monoGrid } from "../utils/grid.js";
 
 export type SectionScore = { section: string; score: number; outOf: number };
 export type WeakTopic = { topic: string; tip: string };

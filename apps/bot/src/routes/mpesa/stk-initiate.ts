@@ -1,6 +1,6 @@
 // apps/bot/src/routes/mpesa/stk-initiate.ts
 import express, { Request, Response, NextFunction } from "express";
-import { stkPush, toMSISDN } from "../../lib/mpesa";
+import { stkPush, toMSISDN } from "../../lib/mpesa.js";
 
 export const router = express.Router();
 

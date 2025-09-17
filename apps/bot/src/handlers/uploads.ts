@@ -1,7 +1,7 @@
 // apps/bot/src/handlers/uploads.ts
 import { Telegraf, Context } from "telegraf";
-import { sessionAddUpload, getActiveByTelegramId } from "../repo/sessionRepo";
-import { buildUploadPath, saveUpload, ensureDir } from "../lib/files";
+import { sessionAddUpload, getActiveByTelegramId } from "../repo/sessionRepo.js";
+import { buildUploadPath, saveUpload, ensureDir } from "../lib/files.js";
 import path from "path";
 import fs from "fs";
 

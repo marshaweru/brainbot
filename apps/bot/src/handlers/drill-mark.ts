@@ -1,6 +1,6 @@
 // apps/bot/src/handlers/drill-mark.ts
 import { Telegraf } from "telegraf";
-import * as drillsRepo from "../repo/drillsRepo";
+import * as drillsRepo from "../repo/drillsRepo.js";
 
 export function registerDrillMarkHandler(bot: Telegraf) {
   // Usage: /drill_mark 66fcd1e6e5b4a8a9dfc1b234 7/10

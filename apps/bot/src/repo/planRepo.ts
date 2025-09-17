@@ -1,5 +1,5 @@
-import { connectMongo } from "../db/mongo";
-import { UserPlanModel } from "../models/UserPlan";
+import { connectMongo } from "../db/mongo.js";
+import { UserPlanModel } from "../models/UserPlan.js";
 
 export type PlanTier = "free" | "lite" | "steady" | "serious" | "elite" | "limited";
 

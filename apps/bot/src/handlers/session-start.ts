@@ -2,11 +2,11 @@
 import { Telegraf } from "telegraf";
 import path from "path";
 import { fileURLToPath } from "url";
-import { assignPaper } from "../services/paper-assigner";
-import { SUBJECTS } from "../subjects";
-import { resolvePaperContent } from "../repo/papersRepo";
-import { SessionModel } from "../models/Session";
-import { startSessionTimer, resolveExamPreset } from "../services/timer";
+import { assignPaper } from "../services/paper-assigner.js";
+import { SUBJECTS } from "../subjects.js";
+import { resolvePaperContent } from "../repo/papersRepo.js";
+import { SessionModel } from "../models/Session.js";
+import { startSessionTimer, resolveExamPreset } from "../services/timer.js";
 
 // ESM-safe __dirname/__filename
 const __filename = fileURLToPath(import.meta.url);

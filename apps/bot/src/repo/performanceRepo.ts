@@ -1,5 +1,5 @@
 // apps/bot/src/repo/performanceRepo.ts
-import { PerformanceModel, type PerformanceDoc } from "../models/Performance";
+import { PerformanceModel, type PerformanceDoc } from "../models/Performance.js";
 import type { FilterQuery } from "mongoose";
 
 /**

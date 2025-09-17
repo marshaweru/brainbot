@@ -1,6 +1,6 @@
 // apps/bot/src/handlers/stats.ts
 import { Telegraf } from "telegraf";
-import { buildUserStats, HeatItem, TrendPoint, buildTopSubjects } from "../services/analytics";
+import { buildUserStats, HeatItem, TrendPoint, buildTopSubjects } from "../services/analytics.js";
 
 export function registerStatsHandlers(bot: Telegraf) {
   bot.command("stats", async (ctx) => {

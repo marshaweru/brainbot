@@ -1,7 +1,7 @@
 // apps/bot/src/image/report-card.ts
 import puppeteer from "puppeteer";
-import type { Feedback } from "../feedback/render";
-import { BRAND, type Brand } from "../pdf/export";
+import type { Feedback } from "../feedback/render.js";
+import { BRAND, type Brand } from "../pdf/export.js";
 
 export async function buildReportCardPng(
   fb: Feedback,

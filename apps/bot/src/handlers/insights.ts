@@ -1,8 +1,8 @@
 // apps/bot/src/handlers/insights.ts
 import { Telegraf } from "telegraf";
-import { getOrGenerateInsight } from "../services/insights";
-import * as sessionRepo from "../repo/sessionRepo";
-import { SUBJECTS } from "../subjects";
+import { getOrGenerateInsight } from "../services/insights.js";
+import * as sessionRepo from "../repo/sessionRepo.js";
+import { SUBJECTS } from "../subjects.js";
 
 function normalizeSubjectLabel(input?: string | null): string | null {
   if (!input) return null;

@@ -2,7 +2,8 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { PaperMeta, KCSESubject } from "../models/Paper";
+import { createRequire } from "module";
+import type { PaperMeta, KCSESubject } from "../models/Paper.js";
 
 /**
  * Directory layout (Phase 1+):
@@ -12,10 +13,11 @@ import { PaperMeta, KCSESubject } from "../models/Paper";
  *            e.g. math/algebra-set-001.json
  */
 const PDF_ROOT = path.join(process.cwd(), "src", "content", "papers");
-const AI_ROOT  = path.join(process.cwd(), "src", "content", "exams-ai");
+const AI_ROOT = path.join(process.cwd(), "src", "content", "exams-ai");
 
 type SourceType = PaperMeta["source"]; // "kcse" | "mock" | "ai"
 
+/** Options for listing/filtering */
 export type ListOptions = {
   year?: number;
   paper?: 1 | 2 | 3;
@@ -24,6 +26,7 @@ export type ListOptions = {
   shuffle?: boolean;
 };
 
+/** Options for choosing “next” paper */
 export type NextOptions = {
   strategy?: "random" | "sequential";
   excludeIds?: string[];
@@ -35,8 +38,8 @@ export type NextOptions = {
 /** Tiny in-process cache (signature-based) */
 const cache = {
   pdf: new Map<string, PaperMeta[]>(), // key = subject
-  ai:  new Map<string, PaperMeta[]>(),
-  sig: new Map<string, string>(),      // key = dir path → signature
+  ai: new Map<string, PaperMeta[]>(),
+  sig: new Map<string, string>(), // key = dir path → signature
 };
 
 function readDirSafe(dir: string): string[] {
@@ -60,16 +63,25 @@ function hashBase(s: string) {
 /** Try to get all subjects from the model; else fall back to a local constant */
 function getAllSubjects(): KCSESubject[] {
   try {
+    const require = createRequire(import.meta.url);
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const maybe = require("../models/Paper");
+    const maybe = require("../models/Paper.js");
     if (Array.isArray(maybe.ALL_SUBJECTS)) return maybe.ALL_SUBJECTS as KCSESubject[];
     if (Array.isArray(maybe.SUBJECTS)) return maybe.SUBJECTS as KCSESubject[];
   } catch {
     // ignore
   }
   const fallback: KCSESubject[] = [
-    "Mathematics","English","Kiswahili","Biology","Chemistry",
-    "Physics","History","Geography","CRE","Business",
+    "Mathematics",
+    "English",
+    "Kiswahili",
+    "Biology",
+    "Chemistry",
+    "Physics",
+    "History",
+    "Geography",
+    "CRE",
+    "Business",
   ];
   return fallback;
 }
@@ -79,7 +91,7 @@ function parsePdfName(subject: KCSESubject, file: string): PaperMeta | null {
   // Accept "paper1", "paper-1", "paper_1", "paper 1"; optional YYYY prefix somewhere
   const m = file.match(/(?:(\d{4}).*?)?paper[\s\-_]?([123])/i);
   const year = m?.[1] ? Number(m[1]) : undefined;
-  const paperNum = m?.[2] ? (Number(m[2]) as 1 | 2 | 3) : (1 as 1);
+  const paperNum = (m?.[2] ? Number(m[2]) : 1) as 1 | 2 | 3;
   // Use subject+file in hash to avoid collisions across folders
   const id = `${subject.toLowerCase()}-${year ?? "na"}-p${paperNum}-${hashBase(
     subject.toLowerCase() + ":" + file
@@ -105,7 +117,7 @@ function parseAiJson(subject: KCSESubject, file: string): PaperMeta | null {
     source: "ai",
     // For AI sets we store a local path in textUrl; your caller can read & parse it
     textUrl: path.join(AI_ROOT, subject.toLowerCase(), file),
-  } as any as PaperMeta;
+  } as unknown as PaperMeta;
 }
 
 /** Load & cache PDFs for a subject; invalidates when directory signature changes */
@@ -120,7 +132,7 @@ function loadPdfs(subject: KCSESubject): PaperMeta[] {
   }
 
   const files = readDirSafe(dir);
-  const items = files.map(f => parsePdfName(subject, f)).filter(Boolean) as PaperMeta[];
+  const items = files.map((f) => parsePdfName(subject, f)).filter(Boolean) as PaperMeta[];
 
   cache.pdf.set(subject, items);
   cache.sig.set(key, sig);
@@ -139,7 +151,7 @@ function loadAiSets(subject: KCSESubject): PaperMeta[] {
   }
 
   const files = readDirSafe(dir);
-  const items = files.map(f => parseAiJson(subject, f)).filter(Boolean) as PaperMeta[];
+  const items = files.map((f) => parseAiJson(subject, f)).filter(Boolean) as PaperMeta[];
 
   cache.ai.set(subject, items);
   cache.sig.set(key, sig);
@@ -147,17 +159,14 @@ function loadAiSets(subject: KCSESubject): PaperMeta[] {
 }
 
 /** Merge sources with optional filtering and sorting. */
-export async function listPapers(
-  subject: KCSESubject,
-  opts: ListOptions = {}
-): Promise<PaperMeta[]> {
+export async function listPapers(subject: KCSESubject, opts: ListOptions = {}): Promise<PaperMeta[]> {
   const pdfs = loadPdfs(subject);
-  const ais  = loadAiSets(subject);
+  const ais = loadAiSets(subject);
   let all = [...pdfs, ...ais];
 
-  if (opts.source) all = all.filter(p => p.source === opts.source);
-  if (opts.year)   all = all.filter(p => p.year === opts.year);
-  if (opts.paper)  all = all.filter(p => p.paper === opts.paper);
+  if (opts.source) all = all.filter((p) => p.source === opts.source);
+  if (opts.year) all = all.filter((p) => p.year === opts.year);
+  if (opts.paper) all = all.filter((p) => p.paper === opts.paper);
 
   // Sort by: (year desc, paper asc, source pref: kcse > mock > ai)
   all.sort((a, b) => {
@@ -189,8 +198,8 @@ export async function getPaperById(id: string): Promise<PaperMeta | null> {
   const subjects: KCSESubject[] = getAllSubjects();
   for (const s of subjects) {
     const pdfs = loadPdfs(s);
-    const ais  = loadAiSets(s);
-    const hit = [...pdfs, ...ais].find(p => p.id === id);
+    const ais = loadAiSets(s);
+    const hit = [...pdfs, ...ais].find((p) => p.id === id);
     if (hit) return hit;
   }
   return null;
@@ -202,23 +211,14 @@ export async function getPaperById(id: string): Promise<PaperMeta | null> {
  * - excludeIds: avoid serving the same paper(s) again this session
  * - optional filters: year/paper/source
  */
-export async function getNextPaper(
-  subject: KCSESubject,
-  opts: NextOptions = {}
-): Promise<PaperMeta | null> {
-  const {
-    strategy = "random",
-    excludeIds = [],
-    year,
-    paper,
-    source,
-  } = opts;
+export async function getNextPaper(subject: KCSESubject, opts: NextOptions = {}): Promise<PaperMeta | null> {
+  const { strategy = "random", excludeIds = [], year, paper, source } = opts;
 
   let pool = await listPapers(subject, { year, paper, source });
 
   if (excludeIds.length) {
     const exclude = new Set(excludeIds);
-    pool = pool.filter(p => !exclude.has(p.id));
+    pool = pool.filter((p) => !exclude.has(p.id));
   }
 
   if (pool.length === 0) return null;
@@ -248,8 +248,8 @@ export function resolvePaperUrl(p: PaperMeta): { type: "url" | "file"; value: st
     return { type: "file", value: p.filePath };
   }
   const subj = String(p.subject).toLowerCase();
-  const yr   = String(p.year ?? "unknown");
-  const num  = p.paper ?? (anyP.paperNumber ?? 1);
+  const yr = String(p.year ?? "unknown");
+  const num = p.paper ?? (anyP.paperNumber ?? 1);
   const synthesized = path.join(PDF_ROOT, subj, `${yr}-paper${num}.pdf`);
   return { type: "file", value: synthesized };
 }
@@ -260,9 +260,9 @@ export function resolvePaperUrl(p: PaperMeta): { type: "url" | "file"; value: st
  * - For PDFs: returns { kind:"pdf", filePath }
  * - For AI JSON: returns { kind:"ai", json }
  */
-export function resolvePaperContent(p: PaperMeta):
-  | { kind: "pdf"; filePath: string }
-  | { kind: "ai"; json: any } {
+export function resolvePaperContent(
+  p: PaperMeta
+): { kind: "pdf"; filePath: string } | { kind: "ai"; json: any } {
   if (p.source === "ai" && (p as any).textUrl) {
     const full = (p as any).textUrl as string;
     if (!fs.existsSync(full)) throw new Error(`AI JSON not found: ${full}`);

@@ -1,7 +1,7 @@
 // apps/bot/src/repo/feedbackRepo.ts
-import { connectMongo } from "../db/mongo";
-import { FeedbackModel } from "../models/Feedback";
-import type { Feedback } from "../feedback/render";
+import { connectMongo } from "../db/mongo.js";
+import { FeedbackModel } from "../models/Feedback.js";
+import type { Feedback } from "../feedback/render.js";
 
 /** Shape loaded via .lean() — keep loose enough to survive schema tweaks */
 type FeedbackLean = Partial<{
