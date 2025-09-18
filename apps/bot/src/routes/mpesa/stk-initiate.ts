@@ -4,31 +4,50 @@ import { stkPush, toMSISDN } from "../../lib/mpesa.js";
 
 export const router = express.Router();
 
-/* ---------------- s2s auth (web → bot) ---------------- */
-function assertServiceAuth(req: Request) {
+/* ---------------- utils ---------------- */
+const jsonOnly = (req: Request, res: Response, next: NextFunction) => {
+  const ct = req.headers["content-type"] || "";
+  if (typeof ct === "string" && ct.includes("application/json")) return next();
+  return res.status(415).json({ ok: false, error: "content-type must be application/json" });
+};
+
+const bearerToken = (req: Request) => {
   const hdr = req.get("authorization") || "";
-  const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
-  if (!token || token !== (process.env.SERVICE_TOKEN || "")) {
-    const err: any = new Error("Unauthorized");
-    err.statusCode = 401;
-    throw err;
+  return hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
+};
+
+/* ---------------- s2s auth (web → bot) ---------------- */
+function requireServiceAuth(req: Request, res: Response, next: NextFunction) {
+  const token = bearerToken(req);
+  const expected = process.env.SERVICE_TOKEN || "";
+  if (!token || token !== expected) {
+    res.setHeader('WWW-Authenticate', 'Bearer realm="brainbot", error="invalid_token"');
+    return res.status(401).json({ ok: false, error: "unauthorized" });
   }
+  next();
 }
 
-/* ---------------- fail fast on MPESA env ---------------- */
+/* ---------------- MPESA env sanity ---------------- */
 function assertMpesaEnv() {
+  // Support both DARAJA_* and MPESA_* names
+  const key     = process.env.DARAJA_CONSUMER_KEY    ?? process.env.MPESA_CONSUMER_KEY;
+  const secret  = process.env.DARAJA_CONSUMER_SECRET ?? process.env.MPESA_CONSUMER_SECRET;
+  const shortCd = process.env.MPESA_SHORTCODE        ?? process.env.DARAJA_SHORTCODE;
+  const passkey = process.env.MPESA_PASSKEY          ?? process.env.DARAJA_PASSKEY;
+  const env     = (process.env.DARAJA_ENV ?? process.env.MPESA_ENV ?? "sandbox").toLowerCase();
+  const cbUrl   = process.env.DARAJA_CALLBACK_URL    ?? process.env.MPESA_CALLBACK_URL;
+
   const missing: string[] = [];
-  if (!process.env.MPESA_CONSUMER_KEY) missing.push("MPESA_CONSUMER_KEY");
-  if (!process.env.MPESA_CONSUMER_SECRET) missing.push("MPESA_CONSUMER_SECRET");
-  if (!process.env.MPESA_SHORTCODE) missing.push("MPESA_SHORTCODE");
-  if (!process.env.MPESA_PASSKEY) missing.push("MPESA_PASSKEY");
-  if ((process.env.MPESA_ENV || "sandbox") === "production" && !process.env.MPESA_CALLBACK_URL) {
-    missing.push("MPESA_CALLBACK_URL");
-  }
+  if (!key)     missing.push("DARAJA_CONSUMER_KEY/MPESA_CONSUMER_KEY");
+  if (!secret)  missing.push("DARAJA_CONSUMER_SECRET/MPESA_CONSUMER_SECRET");
+  if (!shortCd) missing.push("MPESA_SHORTCODE/DARAJA_SHORTCODE");
+  if (!passkey) missing.push("MPESA_PASSKEY/DARAJA_PASSKEY");
+  if (env === "production" && !cbUrl) missing.push("DARAJA_CALLBACK_URL/MPESA_CALLBACK_URL");
+
   if (missing.length) {
-    const err: any = new Error(`Missing MPESA env: ${missing.join(", ")}`);
-    err.statusCode = 500;
-    throw err;
+    const e: any = new Error(`Missing MPESA env: ${missing.join(", ")}`);
+    e.statusCode = 500;
+    throw e;
   }
 }
 
@@ -39,22 +58,22 @@ const acctBuckets = new Map<string, Bucket>();
 
 function rateLimit(opts: { windowMs: number; maxPerIp: number; maxPerAccount: number }) {
   const { windowMs, maxPerIp, maxPerAccount } = opts;
-  let sweepEvery = 0;
+  let tick = 0;
 
-  function take(map: Map<string, Bucket>, key: string, max: number, now: number): number {
-    let b = map.get(key);
+  const take = (map: Map<string, Bucket>, key: string, max: number, now: number): number => {
+    const b = map.get(key);
     if (!b || now > b.reset) {
-      b = { count: 0, reset: now + windowMs };
-      map.set(key, b);
+      map.set(key, { count: 1, reset: now + windowMs });
+      return 0;
     }
     if (b.count >= max) return Math.ceil((b.reset - now) / 1000);
-    b.count++;
+    b.count += 1;
     return 0;
-  }
+  };
 
   return (req: Request, res: Response, next: NextFunction) => {
     const now = Date.now();
-    const ip = (req.ip || req.headers["x-forwarded-for"] || "unknown").toString();
+    const ip = (req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req.ip || "unknown");
     const accountRef = typeof req.body?.accountRef === "string" ? req.body.accountRef : "";
 
     const ipRetry = take(ipBuckets, ip, maxPerIp, now);
@@ -71,15 +90,15 @@ function rateLimit(opts: { windowMs: number; maxPerIp: number; maxPerAccount: nu
       }
     }
 
-    // periodic GC
-    if (++sweepEvery % 200 === 0) {
+    // periodic garbage collection
+    if (++tick % 200 === 0) {
       const gc = (m: Map<string, Bucket>) => {
         const t = Date.now();
         for (const [k, v] of m) if (t > v.reset) m.delete(k);
       };
       gc(ipBuckets);
       gc(acctBuckets);
-      if (sweepEvery > 10_000) sweepEvery = 0;
+      if (tick > 10_000) tick = 0;
     }
 
     next();
@@ -91,13 +110,11 @@ const ALLOWED_AMOUNTS = new Set([69, 499, 1499, 2999, 5999]); // KES
 
 function validateAmount(raw: unknown): number {
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) throw new Error("Invalid amount");
+  if (!Number.isFinite(n) || n <= 0) throw Object.assign(new Error("invalid amount"), { statusCode: 400 });
   if (!ALLOWED_AMOUNTS.has(n)) {
-    const err: any = new Error(
-      `Amount not allowed. Allowed: ${Array.from(ALLOWED_AMOUNTS).join(", ")}`
-    );
-    err.statusCode = 400;
-    throw err;
+    const e: any = new Error(`amount not allowed; allowed: ${[...ALLOWED_AMOUNTS].join(", ")}`);
+    e.statusCode = 400;
+    throw e;
   }
   return n;
 }
@@ -105,13 +122,14 @@ function validateAmount(raw: unknown): number {
 /* ---------------- route ---------------- */
 router.post(
   "/",
+  jsonOnly,
+  requireServiceAuth,
   rateLimit({ windowMs: 60_000, maxPerIp: 5, maxPerAccount: 3 }),
   async (req: Request, res: Response) => {
     try {
-      assertServiceAuth(req);
       assertMpesaEnv();
 
-      const { phone, amount, accountRef, description } = req.body || {};
+      const { phone, amount, accountRef, description } = req.body ?? {};
       if (!phone || !amount || !accountRef) {
         return res.status(400).json({ ok: false, error: "phone, amount, accountRef required" });
       }
@@ -126,14 +144,18 @@ router.post(
         description: description ? String(description) : undefined,
       });
 
+      // Typical Daraja STK response fields:
+      // { MerchantRequestID, CheckoutRequestID, ResponseCode, ResponseDescription, CustomerMessage }
       return res.json({
         ok: true,
         checkout: resp.CheckoutRequestID,
-        message: resp.CustomerMessage,
+        message: resp.CustomerMessage ?? "STK push sent",
       });
     } catch (e: any) {
       const status = e?.statusCode || 500;
-      return res.status(status).json({ ok: false, error: e?.message || "init failed" });
+      return res.status(status).json({ ok: false, error: e?.message || "stk-initiate failed" });
     }
   }
 );
+
+export default router;

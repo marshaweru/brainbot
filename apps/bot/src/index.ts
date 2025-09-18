@@ -24,15 +24,30 @@ import { watchUploadCleaner } from "./services/upload-cleaner.js";
 import { connectMongo } from "./db/mongo.js";
 import { SessionModel } from "./models/Session.js";
 
-// --- NEW: MPESA routes (Express) ------------------------------------------
+// MPESA routes (Express)
 import { router as stkInitiateRouter } from "./routes/mpesa/stk-initiate.js";
 import { router as c2bConfirmRouter } from "./routes/mpesa/c2b-confirmation.js";
 
+// ----------------- Env & Mode -----------------
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is not set");
 
-// Optional: server port for Express
+const MODE = (process.env.BOT_MODE ?? "polling").toLowerCase() as "polling" | "webhook";
+const PUBLIC_URL = process.env.PUBLIC_URL; // required in webhook mode
+const WEBHOOK_PATH = process.env.WEBHOOK_PATH ?? "/bot/webhook";
+
 const PORT = Number(process.env.PORT || process.env.BOT_PORT || 8080);
+
+// ----------------- Helpers -----------------
+function swallow<T>(p: Promise<T>) {
+  return p.catch((e: any) => {
+    console.warn("[bot] non-fatal:", e?.code || e?.message || e);
+    return null as any;
+  });
+}
+
+const escHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // ----------------- Telegraf Bot -----------------
 const bot = new Telegraf(BOT_TOKEN);
@@ -54,10 +69,6 @@ registerStatsHandlers(bot);
 registerInsightsHandlers(bot);
 
 // ----------------- Payments / Upgrade UX (Bot-side) -----------------
-const escHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-// who’s mid-checkout (amount/tier) waiting to share phone or type it
 const pendingCheckout = new Map<string, { amount: number; tier: string; at: number }>();
 
 bot.command("upgrade", async (ctx) => {
@@ -149,7 +160,7 @@ bot.on(message("contact"), async (ctx) => {
   }
 });
 
-// Text: handle typed phone ONLY when mid-checkout; otherwise let other handlers run
+// Text: typed phone while mid-checkout
 bot.on(message("text"), async (ctx, next) => {
   const uid = String(ctx.from?.id ?? "");
   const text = (ctx.message as any).text?.trim() ?? "";
@@ -190,11 +201,10 @@ bot.on(message("text"), async (ctx, next) => {
     return;
   }
 
-  // Not a checkout phone → allow other handlers to process:
   return next();
 });
 
-// ----------------- Express Server (for MPESA) -----------------
+// ----------------- Express (health + M-PESA + optional webhook) -----------------
 const app = express();
 app.disable("x-powered-by");
 app.use(cors({ origin: true, credentials: true }));
@@ -204,35 +214,60 @@ app.set("trust proxy", true);
 // Health
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// Mount MPESA routes
+// MPESA endpoints
 app.use("/mpesa/stk-initiate", stkInitiateRouter);
 app.use("/mpesa/c2b-confirmation", c2bConfirmRouter);
+
+// If running in webhook mode, attach Telegram webhook handler
+// instead of: app.use(WEBHOOK_PATH, express.json(), webhookCallback(bot, "express"));
+
+app.post(WEBHOOK_PATH, express.json(), (req, res) => {
+  bot.handleUpdate(req.body, res).catch((err) => {
+    console.error("Webhook error:", err);
+    res.sendStatus(500);
+  });
+});
+
 
 // ----------------- Bootstrap -----------------
 (async () => {
   try {
     await connectMongo();
 
-    // Rely on schema-defined indexes only (prevents IndexOptionsConflict)
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    // indexes (safe/settled to avoid crashing if already exist)
     await Promise.allSettled([SessionModel.syncIndexes()]);
 
     const me = await bot.telegram.getMe();
     console.log(`🔑 Auth OK: @${me.username} (id ${me.id})`);
 
-    // start cleaner AFTER DB is ready, BEFORE launch
+    // cleaner after DB is ready
     watchUploadCleaner();
 
-    // Start express server
+    // Start HTTP server
     app.listen(PORT, () => {
       console.log(`🌐 HTTP server listening on :${PORT}`);
-      console.log(`   • POST /mpesa/stk-initiate   (protected by SERVICE_TOKEN)`);
-      console.log(`   • POST /mpesa/c2b-confirmation (Daraja callback)`);
+      console.log(`   • GET  /healthz`);
+      console.log(`   • POST /mpesa/stk-initiate`);
+      console.log(`   • POST /mpesa/c2b-confirmation`);
+      if (MODE === "webhook") {
+        console.log(`   • POST ${WEBHOOK_PATH} (Telegram webhook)`);
+      }
     });
 
-    // Start bot long polling
-    await bot.launch();
-    console.log("🚀 BrainBot Telegram bot running! Listening for updates…");
+    if (MODE === "polling") {
+      // Local: network to api.telegram.org can be flaky → swallow timeouts
+      await swallow(bot.telegram.deleteWebhook({ drop_pending_updates: true }));
+      await bot.launch();
+      console.log("🚀 BrainBot Telegram bot running (long-polling)!");
+    } else {
+      // Render/webhook mode
+      await swallow(
+        bot.telegram.setWebhook(`${PUBLIC_URL}${WEBHOOK_PATH}`, {
+          secret_token: process.env.TG_SECRET,
+        })
+      );
+      console.log("🚀 BrainBot Telegram bot running (webhook)!");
+    }
   } catch (err) {
     console.error("💥 startup error:", err);
   }

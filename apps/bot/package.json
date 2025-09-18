@@ -3,18 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -b",
+    "dev": "tsx watch --no-check src/index.ts",
+    "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "axios": "^1.12.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "mongoose": "^8.3.3",
-    "puppeteer": "^24.19.0",
+    "puppeteer": "^24.20.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
@@ -22,9 +22,11 @@
     "@types/express": "^5.0.3",
     "@types/node": "^20.19.13",
     "@types/puppeteer": "^5.4.7",
-    "cors": "^2.8.5",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
