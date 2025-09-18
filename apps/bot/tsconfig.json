@@ -14,11 +14,10 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "verbatimModuleSyntax": true
+
+    "verbatimModuleSyntax": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "src/pdf/**"],
-  "references": [
-    { "path": "../../packages/shared" }
-  ]
+  "references": [{ "path": "../../packages/shared" }]
 }
