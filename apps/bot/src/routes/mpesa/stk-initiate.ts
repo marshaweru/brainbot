@@ -1,8 +1,8 @@
-// apps/bot/src/routes/mpesa/stk-initiate.ts
-import express, { Request, Response, NextFunction } from "express";
+import express, { Router } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { stkPush, toMSISDN } from "../../lib/mpesa.js";
 
-export const router = express.Router();
+export const router = Router();
 
 /* ---------------- utils ---------------- */
 const jsonOnly = (req: Request, res: Response, next: NextFunction) => {
@@ -141,15 +141,14 @@ router.post(
         amount: amt,
         phone: msisdn,
         accountRef: String(accountRef),
-        description: description ? String(description) : undefined,
+        description: description ? String(description) : undefined
       });
 
-      // Typical Daraja STK response fields:
       // { MerchantRequestID, CheckoutRequestID, ResponseCode, ResponseDescription, CustomerMessage }
       return res.json({
         ok: true,
         checkout: resp.CheckoutRequestID,
-        message: resp.CustomerMessage ?? "STK push sent",
+        message: resp.CustomerMessage ?? "STK push sent"
       });
     } catch (e: any) {
       const status = e?.statusCode || 500;

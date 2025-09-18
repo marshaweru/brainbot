@@ -1,9 +1,11 @@
+// apps/web/tsconfig.json
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "Bundler",
+
     "jsx": "preserve",
     "strict": true,
 
@@ -15,7 +17,7 @@
       "@/app/*": ["app/*"],
       "@/components/*": ["components/*"],
       "@/lib/*": ["lib/*"]
-      // ❌ remove @brainbot/shared path hacks—use the workspace package export
+      // no path alias for @brainbot/shared — use the workspace package
     },
 
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -30,7 +32,7 @@
     "plugins": [{ "name": "next" }]
   },
   "references": [
-    { "path": "../../packages/shared" }  // ✅ build shared first
+    { "path": "../../packages/shared" }
   ],
   "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
