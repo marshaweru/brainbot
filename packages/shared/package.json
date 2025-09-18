@@ -1,18 +1,26 @@
 {
   "name": "@brainbot/shared",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./db": "./dist/db/index.js"   
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./db": {
+      "import": "./dist/db/index.js",
+      "types": "./dist/db/index.d.ts"
+    }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
