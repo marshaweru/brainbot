@@ -1,19 +1,15 @@
 {
   "name": "brainbot-root",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "scripts": {
-    "build": "npm run -ws build",
-    "dev:web": "npm run dev --workspace=apps/web",
-    "dev:bot": "npm run dev --workspace=apps/bot",
-    "dev:admin": "npm run dev --workspace=apps/admin",
-    "start:web": "npm run start --workspace=apps/web",
-    "start:bot": "npm run start --workspace=apps/bot",
+    "build": "pnpm -r build",
+    "dev:web": "pnpm --filter @brainbot/web dev",
+    "dev:bot": "pnpm --filter @brainbot/bot dev",
+    "dev:admin": "pnpm --filter @brainbot/admin dev",
+    "start:web": "pnpm --filter @brainbot/web start",
+    "start:bot": "pnpm --filter @brainbot/bot start",
+    "start:admin": "pnpm --filter @brainbot/admin start",
     "backfill:link-expiry": "tsx apps/web/scripts/backfill-link-token-expiry.ts",
-    "start:admin": "npm run start --workspace=apps/admin",
     "ts": "ts-node",
     "run:ts": "npx ts-node --loader ts-node/esm"
   },
@@ -38,5 +34,8 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
