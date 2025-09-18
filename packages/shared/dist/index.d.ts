@@ -1,7 +1,2 @@
-export { PLANS, PLAN_LABELS, PLAN_PRICES_KES, PLAN_LIMITS, planFromAmount, getUserPlan, upgradeUserPlan, } from "./plan.js";
-export type { PlanTier, PlanDetails, UserPlan } from "./plan.js";
-export { SUBJECTS } from "./subjects.js";
-export type { SubjectSlug, SubjectLabel, SubjectName } from "./subjects.js";
-export * from "./markingPrompt.js";
-export * from "./types.js";
-export * from "./db/ensureIndexes.js";
+export * from "./db/index.js";
+export declare const sharedVersion = "1.0.0";

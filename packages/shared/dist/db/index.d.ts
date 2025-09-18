@@ -1,1 +1,2 @@
-export * from "./ensureIndexes.js";
+export type MongoId = string;
+export declare const ping: () => string;
