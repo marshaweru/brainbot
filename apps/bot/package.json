@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.10.0",
+  "engines": { "node": ">=20.11.0" },
+  "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch --no-check src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@brainbot/shared": "workspace:*",
@@ -21,13 +25,10 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
-    "@types/node": "^20.19.13",
+    "@types/node": "^20.12.7",
     "@types/puppeteer": "^5.4.7",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
-    "typescript": "^5.4.5"
-  },
-  "engines": {
-    "node": ">=20"
+    "typescript": "^5.9.2"
   }
 }

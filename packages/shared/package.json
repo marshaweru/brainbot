@@ -15,10 +15,16 @@
       "types": "./dist/db/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc"
+    "build": "tsc --build",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
   },
   "engines": {
     "node": ">=20"
