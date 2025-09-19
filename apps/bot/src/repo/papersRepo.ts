@@ -2,18 +2,28 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { createRequire } from "module";
 import type { PaperMeta, KCSESubject } from "../models/Paper.js";
 
 /**
  * Directory layout (Phase 1+):
- *   - PDFs:  src/content/papers/<subject>/*.pdf
+ *   - PDFs:  apps/bot/src/content/papers/<subject>/*.pdf
  *            e.g. math/2021-paper1.pdf, english/2020-paper2.pdf
- *   - AI:    src/content/exams-ai/<subject>/*.json
+ *   - AI:    apps/bot/src/content/exams-ai/<subject>/*.json
  *            e.g. math/algebra-set-001.json
+ *
+ * We resolve from process.cwd():
+ *  - If service root is repo root → cwd=/…/repo
+ *  - If service root is apps/bot   → cwd=/…/repo/apps/bot
+ * Works in both by anchoring on BOT_ROOT.
  */
-const PDF_ROOT = path.join(process.cwd(), "src", "content", "papers");
-const AI_ROOT = path.join(process.cwd(), "src", "content", "exams-ai");
+const BOT_ROOT = process.env.BOT_CWD || process.cwd();
+const CONTENT_ROOT =
+  path.basename(BOT_ROOT).toLowerCase() === "bot"
+    ? path.resolve(BOT_ROOT, "src", "content")
+    : path.resolve(BOT_ROOT, "apps", "bot", "src", "content");
+
+const PDF_ROOT = path.join(CONTENT_ROOT, "papers");
+const AI_ROOT = path.join(CONTENT_ROOT, "exams-ai");
 
 type SourceType = PaperMeta["source"]; // "kcse" | "mock" | "ai"
 
@@ -63,13 +73,13 @@ function hashBase(s: string) {
 /** Try to get all subjects from the model; else fall back to a local constant */
 function getAllSubjects(): KCSESubject[] {
   try {
-    const require = createRequire(import.meta.url);
+    // In CJS output, `require` exists; TS will transpile fine.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const maybe = require("../models/Paper.js");
     if (Array.isArray(maybe.ALL_SUBJECTS)) return maybe.ALL_SUBJECTS as KCSESubject[];
     if (Array.isArray(maybe.SUBJECTS)) return maybe.SUBJECTS as KCSESubject[];
   } catch {
-    // ignore
+    /* ignore */
   }
   const fallback: KCSESubject[] = [
     "Mathematics",
@@ -115,21 +125,19 @@ function parseAiJson(subject: KCSESubject, file: string): PaperMeta | null {
     subject,
     paper: 1, // default; AI can define its own internal structure
     source: "ai",
-    // For AI sets we store a local path in textUrl; your caller can read & parse it
+    // For AI sets we store a local path in textUrl; caller reads & parses it
     textUrl: path.join(AI_ROOT, subject.toLowerCase(), file),
   } as unknown as PaperMeta;
 }
 
 /** Load & cache PDFs for a subject; invalidates when directory signature changes */
 function loadPdfs(subject: KCSESubject): PaperMeta[] {
-  const dir = path.join(PDF_ROOT, subject.toLowerCase());
+  const dir = path.join(PDF_ROOT, String(subject).toLowerCase());
   const sig = dirSignature(dir);
   const key = `pdf:${dir}`;
   const last = cache.sig.get(key);
 
-  if (cache.pdf.has(subject) && last === sig) {
-    return cache.pdf.get(subject)!;
-  }
+  if (cache.pdf.has(subject) && last === sig) return cache.pdf.get(subject)!;
 
   const files = readDirSafe(dir);
   const items = files.map((f) => parsePdfName(subject, f)).filter(Boolean) as PaperMeta[];
@@ -141,14 +149,12 @@ function loadPdfs(subject: KCSESubject): PaperMeta[] {
 
 /** Load & cache AI JSON sets for a subject */
 function loadAiSets(subject: KCSESubject): PaperMeta[] {
-  const dir = path.join(AI_ROOT, subject.toLowerCase());
+  const dir = path.join(AI_ROOT, String(subject).toLowerCase());
   const sig = dirSignature(dir);
   const key = `ai:${dir}`;
   const last = cache.sig.get(key);
 
-  if (cache.ai.has(subject) && last === sig) {
-    return cache.ai.get(subject)!;
-  }
+  if (cache.ai.has(subject) && last === sig) return cache.ai.get(subject)!;
 
   const files = readDirSafe(dir);
   const items = files.map((f) => parseAiJson(subject, f)).filter(Boolean) as PaperMeta[];
@@ -186,10 +192,7 @@ export async function listPapers(subject: KCSESubject, opts: ListOptions = {}): 
     }
   }
 
-  if (opts.limit && opts.limit > 0) {
-    all = all.slice(0, opts.limit);
-  }
-
+  if (opts.limit && opts.limit > 0) all = all.slice(0, opts.limit);
   return all;
 }
 
@@ -211,7 +214,10 @@ export async function getPaperById(id: string): Promise<PaperMeta | null> {
  * - excludeIds: avoid serving the same paper(s) again this session
  * - optional filters: year/paper/source
  */
-export async function getNextPaper(subject: KCSESubject, opts: NextOptions = {}): Promise<PaperMeta | null> {
+export async function getNextPaper(
+  subject: KCSESubject,
+  opts: NextOptions = {}
+): Promise<PaperMeta | null> {
   const { strategy = "random", excludeIds = [], year, paper, source } = opts;
 
   let pool = await listPapers(subject, { year, paper, source });

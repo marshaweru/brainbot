@@ -1,24 +1,17 @@
 // apps/bot/src/handlers/session-start.ts
-import { Telegraf } from "telegraf";
-import path from "path";
-import { fileURLToPath } from "url";
+import type { Telegraf } from "telegraf";
 import { assignPaper } from "../services/paper-assigner.js";
 import { SUBJECTS } from "../subjects.js";
 import { resolvePaperContent } from "../repo/papersRepo.js";
 import { SessionModel } from "../models/Session.js";
 import { startSessionTimer, resolveExamPreset } from "../services/timer.js";
 
-// ESM-safe __dirname/__filename
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const escHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // SUBJECTS can be strings or { slug, label }
 function subjectLabelAt(index: number): string {
-  const item = SUBJECTS[index];
-  // @ts-ignore tolerate both shapes
+  const item = SUBJECTS[index] as any;
   return (item?.label as string) || String(item);
 }
 
@@ -81,10 +74,13 @@ export function registerSessionStart(bot: Telegraf) {
 
   // Number-only message = subject pick (only when awaiting-subject)
   bot.hears(/^[1-9]\d?$/, async (ctx) => {
-    const telegramId = String(ctx.from?.id ?? "");
-    const n = Number((ctx.message as any).text);
+    const text = (ctx.message as any)?.text?.trim();
+    if (!text) return;
 
-    if (n < 1 || n > SUBJECTS.length) return;
+    const n = Number(text);
+    if (!Number.isInteger(n) || n < 1 || n > SUBJECTS.length) return;
+
+    const telegramId = String(ctx.from?.id ?? "");
 
     // Make sure we are choosing a subject for a pending session
     const session = await SessionModel.findOne({
@@ -107,7 +103,9 @@ export function registerSessionStart(bot: Telegraf) {
     }
 
     // Normalize paper number field (supports either .paper or .paperNumber)
-    const paperNum: 1 | 2 | 3 = (Number((paper as any).paper ?? (paper as any).paperNumber ?? 1) as 1 | 2 | 3);
+    const paperNum: 1 | 2 | 3 = Number(
+      (paper as any).paper ?? (paper as any).paperNumber ?? 1
+    ) as 1 | 2 | 3;
 
     // Update session → in-progress + subject + paper
     session.mode = "in-progress";
@@ -125,12 +123,12 @@ export function registerSessionStart(bot: Telegraf) {
 
     // Deliver the paper
     const r = resolvePaperContent(paper as any);
-    const caption = `${paper.subject ?? subjectLabel} ${paper.year ?? ""} – Paper ${paperNum}`.trim();
+    const caption = `${(paper as any).subject ?? subjectLabel} ${(paper as any).year ?? ""} – Paper ${paperNum}`.trim();
 
     if (r.kind === "pdf") {
       await ctx.replyWithDocument({ source: r.filePath }, { caption });
     } else {
-      // AI set placeholder; upgrade later to render items
+      // AI-set placeholder; upgrade later to render items
       await ctx.replyWithHTML(
         `📘 <b>${escHtml(subjectLabel)}</b> AI-set available. (Rendering inline text/quiz in future versions)`
       );

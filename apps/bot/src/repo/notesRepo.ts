@@ -1,11 +1,7 @@
+// apps/bot/src/repo/notesRepo.ts
 import { promises as fs } from "fs";
 import path from "path";
 import { SUBJECTS } from "../subjects.js";
-import { fileURLToPath } from "url";
-
-// ESM-safe dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const NOTES_ROOT = path.resolve(__dirname, "..", "content", "notes");
 
@@ -13,11 +9,13 @@ const NOTES_ROOT = path.resolve(__dirname, "..", "content", "notes");
 function normalizeSubjectLabel(label?: string | null): string | null {
   if (!label) return null;
 
-  const lower = label.toLowerCase();
+  const lower = String(label).toLowerCase();
+
+  // SUBJECTS can be strings or { slug, label }
   const hit =
-    SUBJECTS.find((s: any) => s?.slug?.toLowerCase?.() === lower) ||
-    SUBJECTS.find((s: any) => s?.label?.toLowerCase?.() === lower) ||
-    SUBJECTS.find((s: any) => String(s).toLowerCase() === lower);
+    (SUBJECTS as any[]).find((s) => s?.slug?.toLowerCase?.() === lower) ??
+    (SUBJECTS as any[]).find((s) => s?.label?.toLowerCase?.() === lower) ??
+    (SUBJECTS as any[]).find((s) => String(s).toLowerCase() === lower);
 
   if (!hit) return lower;
   return (hit as any).slug || (hit as any).label || String(hit);
@@ -28,11 +26,11 @@ function slug(s: string): string {
 }
 
 export type NoteDoc = {
-  subject: string | null;
-  topic: string;
-  filename: string;
-  relpath: string;
-  markdown: string;
+  subject: string | null; // folder slug (e.g., "mathematics") or null if global
+  topic: string;          // human-friendly topic derived from filename
+  filename: string;       // absolute path to the file on disk
+  relpath: string;        // relative to NOTES_ROOT
+  markdown: string;       // file contents
 };
 
 async function readNoteFile(abs: string, subjectSlug: string | null): Promise<NoteDoc> {
@@ -43,46 +41,56 @@ async function readNoteFile(abs: string, subjectSlug: string | null): Promise<No
   return { subject: subjectSlug, topic, filename: abs, relpath: rel, markdown: md };
 }
 
+async function safeReaddir(dir: string): Promise<string[]> {
+  try {
+    return await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+}
+
 export async function getNotes(topic: string, subjectLabel?: string | null): Promise<NoteDoc[]> {
+  const q = topic?.trim();
+  if (!q) return [];
+
   const subjectSlug = normalizeSubjectLabel(subjectLabel);
-  const topicSlug = slug(topic);
+  const topicSlug = slug(q);
   const results: NoteDoc[] = [];
 
   const scanFolder = async (folder: string, subjSlug: string | null) => {
-    let entries: string[] = [];
-    try {
-      entries = await fs.readdir(folder);
-    } catch {
-      return;
-    }
+    const entries = await safeReaddir(folder);
+    if (!entries.length) return;
+
     const mdFiles = entries.filter((f) => f.toLowerCase().endsWith(".md"));
 
+    // First pass: filename slug match (fast)
     for (const file of mdFiles) {
       if (file.toLowerCase().includes(topicSlug)) {
         results.push(await readNoteFile(path.join(folder, file), subjSlug));
       }
     }
 
+    // Second pass: content contains raw query (only if none found yet)
     if (results.length === 0) {
+      const qLower = q.toLowerCase();
       for (const file of mdFiles) {
         const abs = path.join(folder, file);
-        const text = await fs.readFile(abs, "utf8");
-        if (text.toLowerCase().includes(topic.toLowerCase())) {
+        const text = await fs.readFile(abs, "utf8").catch(() => "");
+        if (text && text.toLowerCase().includes(qLower)) {
           results.push(await readNoteFile(abs, subjSlug));
         }
       }
     }
   };
 
-  if (subjectSlug) await scanFolder(path.join(NOTES_ROOT, subjectSlug), subjectSlug);
+  // Prefer subject-specific folder when provided
+  if (subjectSlug) {
+    await scanFolder(path.join(NOTES_ROOT, subjectSlug), subjectSlug);
+  }
 
+  // If nothing yet, scan all subject folders (shallow)
   if (results.length === 0) {
-    let subjects: string[] = [];
-    try {
-      subjects = await fs.readdir(NOTES_ROOT);
-    } catch {
-      return [];
-    }
+    const subjects = await safeReaddir(NOTES_ROOT);
     for (const subj of subjects) {
       const full = path.join(NOTES_ROOT, subj);
       const stat = await fs.stat(full).catch(() => null);

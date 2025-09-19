@@ -16,7 +16,6 @@
   "type": "module",
   "dependencies": {
     "@sparticuz/chromium": "^138.0.2",
-    "@types/mongodb": "^4.0.6",
     "dayjs": "^1.11.18",
     "echarts": "^5.6.0",
     "echarts-for-react": "^3.0.2",
