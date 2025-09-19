@@ -2,31 +2,36 @@
   "name": "@brainbot/shared",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
+
+  "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+
   "exports": {
     ".": {
-      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
     "./db": {
-      "import": "./dist/db/index.js",
+      "require": "./dist/db/index.js",
+      "default": "./dist/db/index.js",
       "types": "./dist/db/index.d.ts"
     }
   },
-  "files": [
-    "dist"
-  ],
+
+  "files": ["dist"],
   "sideEffects": false,
+
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc -b",
     "clean": "rimraf dist"
   },
+
   "devDependencies": {
+    "rimraf": "^5.0.0",
     "typescript": "^5.9.2"
   },
-  "engines": {
-    "node": ">=20"
-  }
+
+  "engines": { "node": ">=20" }
 }
