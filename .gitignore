@@ -5,3 +5,4 @@ apps/*/build/
 .turbo/
 .env
 .env.*
+dist/
