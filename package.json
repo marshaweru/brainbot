@@ -3,32 +3,28 @@
   "private": true,
   "packageManager": "pnpm@9.10.0",
   "type": "module",
-  "engines": { "node": ">=20.11.0" },
-
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "scripts": {
     "build": "pnpm -r build",
-
     "build:shared": "pnpm --filter @brainbot/shared build",
     "build:bot": "pnpm --filter @brainbot/bot build",
     "start:bot": "pnpm --filter @brainbot/bot start",
-
     "dev:web": "pnpm --filter @brainbot/web dev",
     "dev:bot": "pnpm --filter @brainbot/bot dev",
     "dev:admin": "pnpm --filter @brainbot/admin dev",
     "start:web": "pnpm --filter @brainbot/web start",
     "start:admin": "pnpm --filter @brainbot/admin start",
-
     "backfill:link-expiry": "tsx apps/web/scripts/backfill-link-token-expiry.ts",
     "ts": "ts-node",
     "run:ts": "npx ts-node --loader ts-node/esm"
   },
-
   "dependencies": {
     "@sparticuz/chromium": "^138.0.2",
     "dayjs": "^1.11.18",
     "echarts": "^5.6.0",
     "echarts-for-react": "^3.0.2",
-    "mongodb": "^6.19.0",
     "pdfkit": "^0.17.2",
     "puppeteer-core": "^24.20.0",
     "recharts": "^3.2.0"
