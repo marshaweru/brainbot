@@ -6,3 +6,4 @@ apps/*/build/
 .env
 .env.*
 dist/
+dist/
