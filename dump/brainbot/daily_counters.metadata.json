@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"telegramId":{"$numberInt":"1"},"date":{"$numberInt":"1"}},"name":"uniq_daily_telegramId_date","unique":true}],"uuid":"1844a0df9e9441d79d8e2b72157ff84d","collectionName":"daily_counters","type":"collection"}

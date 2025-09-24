@@ -3,20 +3,20 @@
   "version": "1.0.0",
   "private": true,
 
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
 
   "exports": {
     ".": {
-      "require": "./dist/index.js",
-      "default": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
     },
     "./db": {
-      "require": "./dist/db/index.js",
-      "default": "./dist/db/index.js",
-      "types": "./dist/db/index.d.ts"
+      "types": "./dist/db/index.d.ts",
+      "import": "./dist/db/index.js",
+      "require": "./dist/db/index.js"
     }
   },
 
@@ -28,9 +28,13 @@
     "clean": "rimraf dist"
   },
 
+  "peerDependencies": {
+    "mongodb": "^6.8.0"
+  },
   "devDependencies": {
     "rimraf": "^5.0.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "mongodb": "6.8.0"
   },
 
   "engines": { "node": ">=20" }

@@ -1,8 +1,11 @@
+// apps/web/app/free-session/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import KCSEBadge from "../../components/KCSEBadge"; // 🔥 removed `.js`
+import KCSEBadge from "@/components/KCSEBadge";
+
+const TG_BOT = "brainbotafrica_bot";
 
 export default function FreeSessionPage() {
   return (
@@ -21,10 +24,17 @@ function StartBlock() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let wid = localStorage.getItem("brainbot:wid");
-    if (!wid) {
-      wid = crypto.randomUUID();
-      localStorage.setItem("brainbot:wid", wid);
+    // Ensure a stable wid for this browser
+    let wid = "";
+    try {
+      wid = localStorage.getItem("brainbot:wid") || "";
+      if (!wid) {
+        // window.crypto is available in the browser runtime
+        wid = crypto.randomUUID();
+        localStorage.setItem("brainbot:wid", wid);
+      }
+    } catch {
+      // If storage is blocked, continue without caching wid
     }
 
     (async () => {
@@ -34,24 +44,50 @@ function StartBlock() {
         const r = await fetch("/api/start-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({ plan, wid }),
         });
-        const j = await r.json();
-        if (j?.wid) localStorage.setItem("brainbot:wid", j.wid);
+
+        let j: any = null;
+        try {
+          j = await r.json();
+        } catch {
+          throw new Error(`Bad JSON (HTTP ${r.status})`);
+        }
+        if (!r.ok) {
+          throw new Error(j?.msg || `HTTP ${r.status}`);
+        }
+
+        if (j?.wid) {
+          try { localStorage.setItem("brainbot:wid", j.wid); } catch {}
+        }
         const st = j?.startParam || (j?.token ? `st_${j.token}` : "");
         setStartParam(st);
-      } catch {
-        setError("Couldn’t prepare the session. Try again.");
+      } catch (e: any) {
+        setError(e?.message || "Couldn’t prepare the session. Try again.");
       } finally {
         setLoading(false);
       }
     })();
   }, [plan]);
 
-  const go = () => {
+  const deepLink = startParam
+    ? `https://t.me/${TG_BOT}?start=${encodeURIComponent(startParam)}`
+    : "";
+
+  const openTelegram = () => {
+    if (!deepLink) return;
+    window.open(deepLink, "_blank", "noopener,noreferrer");
+  };
+
+  const copyCommand = async () => {
     if (!startParam) return;
-    const url = `https://t.me/brainbotafrica_bot?start=${encodeURIComponent(startParam)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    try {
+      await navigator.clipboard.writeText(`/start ${startParam}`);
+      alert("Copied! Paste in Telegram.");
+    } catch {
+      alert("Copy failed—just type /start " + startParam);
+    }
   };
 
   return (
@@ -63,15 +99,25 @@ function StartBlock() {
       </h2>
       <p className="text-steel-300">Runs in Telegram with fast uploads and examiner feedback.</p>
 
-      <button
-        onClick={go}
-        disabled={!startParam || loading}
-        className="mt-8 rounded-2xl px-8 py-4 text-lg font-bold bg-gold-500 text-ink-900 hover:bg-gold-400 disabled:opacity-60"
-      >
-        {loading ? "Preparing…" : "Open in Telegram"}
-      </button>
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <button
+          onClick={openTelegram}
+          disabled={!startParam || loading}
+          className="rounded-2xl px-8 py-4 text-lg font-bold bg-gold-500 text-ink-900 hover:bg-gold-400 disabled:opacity-60"
+        >
+          {loading ? "Preparing…" : "Open in Telegram"}
+        </button>
 
-      {error && <div className="mt-4 text-red-300 text-sm">{error}</div>}
+        <button
+          onClick={copyCommand}
+          disabled={!startParam}
+          className="rounded-2xl px-4 py-3 text-sm font-semibold border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-60"
+        >
+          Copy “/start …”
+        </button>
+      </div>
+
+      {error && <div className="mt-4 text-rose-300 text-sm">{error}</div>}
 
       <div className="mt-6 text-sm text-steel-300">
         Prefer pairing by code?{" "}

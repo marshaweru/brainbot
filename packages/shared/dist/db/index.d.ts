@@ -1,2 +1,5 @@
-export type MongoId = string;
-export declare const ping: () => string;
+export { getDb } from "./client";
+export { userLinks, ensureUserLinksIndexes } from "./models/userLinks";
+export type { UserLink } from "./models/userLinks";
+export { ensureWebIndexes } from "./ensureIndexes";
+//# sourceMappingURL=index.d.ts.map

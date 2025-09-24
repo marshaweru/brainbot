@@ -5,14 +5,14 @@ import cors from "cors";
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 
-import { registerStart } from "./handlers/start.js";                  // /start st_<jwt> (JWT link)
+import { registerStart } from "./handlers/start.js";                  // /start st_<jwt> or drill_<topic>
 import { registerSessionStart } from "./handlers/session-start.js";   // /session + subject pick + timers + paper
 import { registerUploads } from "./handlers/uploads.js";              // photo/voice/document/text with window rules
 import { registerSessionFinish } from "./handlers/session-finish.js"; // /finish → marking + feedback + pdf + notes/drills
 import { registerRemark } from "./handlers/remark.js";                // /remark <sessionId> (re-mark past session)
 import { registerExportPdf } from "./handlers/export-pdf.js";         // /pdf
 import { registerNotesHandlers } from "./handlers/notes.js";          // /notes
-import { registerDrillHandlers } from "./handlers/drills.js";         // /drill
+import { registerDrillHandlers } from "./handlers/drills.js";                  // /drill + deep-link drill_<topic>
 import { registerStatsHandlers } from "./handlers/stats.js";          // /stats
 import { registerInsightsHandlers } from "./handlers/insights.js";    // /insights
 
@@ -64,7 +64,7 @@ registerSessionFinish(bot);
 registerRemark(bot);
 registerExportPdf(bot);
 registerNotesHandlers(bot);
-registerDrillHandlers(bot);
+registerDrillHandlers(bot); // ✅ new drill flow (command + deep-link)
 registerStatsHandlers(bot);
 registerInsightsHandlers(bot);
 
@@ -219,15 +219,12 @@ app.use("/mpesa/stk-initiate", stkInitiateRouter);
 app.use("/mpesa/c2b-confirmation", c2bConfirmRouter);
 
 // If running in webhook mode, attach Telegram webhook handler
-// instead of: app.use(WEBHOOK_PATH, express.json(), webhookCallback(bot, "express"));
-
 app.post(WEBHOOK_PATH, express.json(), (req, res) => {
   bot.handleUpdate(req.body, res).catch((err) => {
     console.error("Webhook error:", err);
     res.sendStatus(500);
   });
 });
-
 
 // ----------------- Bootstrap -----------------
 (async () => {

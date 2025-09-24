@@ -1,13 +1,37 @@
+// apps/web/components/PricingCards.tsx
 import clsx from "clsx";
 import { headers } from "next/headers";
+import type { CSSProperties } from "react";
 
-export default async function PricingCards() {
+type Plan = {
+  name: string;
+  price: string;
+  subtitle: string;
+  badge: "MOST" | "LIMITED" | null;
+  features: string[];
+  cta: string;
+  accent: "mint" | "gold" | "plum";
+};
+
+type Props = {
+  buildCtaHref?: (planName: string) => string; // optional override for CTA links
+};
+
+function safeInt(n: unknown, fallback: number) {
+  const x = Number(n);
+  return Number.isFinite(x) ? x : fallback;
+}
+
+export default async function PricingCards({ buildCtaHref }: Props) {
   // Build absolute URL for SSR fetch
   const h = headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host")!;
-  const proto = h.get("x-forwarded-proto") ?? "http";
+  const forwardedHost = h.get("x-forwarded-host");
+  const host = forwardedHost ?? h.get("host") ?? "localhost:3000";
+  const proto =
+    h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const base = `${proto}://${host}`;
 
+  // Defaults in case API call fails
   let claimed = 0;
   let total = 100;
 
@@ -15,14 +39,14 @@ export default async function PricingCards() {
     const res = await fetch(`${base}/api/limited-edition`, { cache: "no-store" });
     if (res.ok) {
       const j = await res.json();
-      claimed = Number(j.claimed ?? 0);
-      total = Number(j.total ?? 100);
+      claimed = safeInt(j.claimed, 0);
+      total = safeInt(j.total, 100);
     }
   } catch {
-    // fallback to defaults
+    // swallow — fallback to defaults
   }
 
-  const plans = [
+  const plans: Plan[] = [
     {
       name: "Lite Pass",
       price: "KES 69",
@@ -54,11 +78,10 @@ export default async function PricingCards() {
       accent: "mint",
     },
     {
-      // Centerpiece
       name: "Elite Prep",
       price: "KES 5,999",
       subtitle: "30 days • 4 papers/day • unlimited hours",
-      badge: "MOST" as const,
+      badge: "MOST",
       features: [
         "4 full KCSE papers per day",
         "Unlimited hours & topic drills",
@@ -90,11 +113,10 @@ export default async function PricingCards() {
       accent: "mint",
     },
     {
-      // Last card
       name: "Limited-Edition Prep Pass",
       price: "KES 1,499",
       subtitle: `First 100 only • ${claimed}/${total} claimed • 30 days • 2 papers/day`,
-      badge: "LIMITED" as const,
+      badge: "LIMITED",
       features: [
         "All Serious Prep features",
         "2 full KCSE papers per day",
@@ -109,27 +131,42 @@ export default async function PricingCards() {
     },
   ];
 
+  const claimPct = Math.min(
+    100,
+    Math.max(0, total ? Math.round((claimed / total) * 100) : 0)
+  );
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 w-full">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 w-full">
       {plans.map((plan) => {
         const isElite = plan.badge === "MOST";
         const isLimited = plan.badge === "LIMITED";
+
+        // 🔗 CTA link: either deep-link (if provided) or fallback
+        const href = buildCtaHref ? buildCtaHref(plan.name) : "#pay";
 
         return (
           <div
             key={plan.name}
             className={clsx(
-              // Base card now uses glass-light for max readability
-              "flex flex-col glass-light rounded-2xl p-5 shadow-lg text-white",
+              "flex flex-col glass-light rounded-2xl p-5 shadow-lg text-white min-h-full",
               isElite && "ring-2 ring-gold-500 shadow-gold-500/40 shadow-xl",
-              isLimited && "ring-2 ring-plum-400",
-              "min-h-full"
+              isLimited && "ring-2 ring-plum-400"
             )}
-            style={isLimited ? ({ animation: "pulse 1.5s ease-out 1" } as React.CSSProperties) : undefined}
+            style={
+              isLimited
+                ? ({ animation: "pulse 1.5s ease-out 1" } as CSSProperties)
+                : undefined
+            }
           >
             {/* Header */}
             <div className="flex items-center justify-between mb-2">
-              <div className={clsx("text-lg font-bold", isElite ? "text-gold-500" : "text-white")}>
+              <div
+                className={clsx(
+                  "text-lg font-bold",
+                  isElite ? "text-gold-500" : "text-white"
+                )}
+              >
                 {plan.name}
               </div>
 
@@ -138,8 +175,9 @@ export default async function PricingCards() {
                   className={clsx(
                     "px-3 py-1 rounded-full text-[10px] font-extrabold tracking-wide",
                     isElite && "bg-gold-500 text-black",
-                    plan.badge === "LIMITED" && "bg-plum-400 text-black"
+                    isLimited && "bg-plum-400 text-black"
                   )}
+                  aria-label={isElite ? "Most popular" : "Limited edition"}
                 >
                   {isElite ? "ELITE • MOST POPULAR" : plan.badge}
                 </div>
@@ -147,7 +185,12 @@ export default async function PricingCards() {
             </div>
 
             {/* Price */}
-            <div className={clsx("text-2xl font-extrabold mb-1", isElite ? "text-gold-500" : "text-white")}>
+            <div
+              className={clsx(
+                "text-2xl font-extrabold mb-1",
+                isElite ? "text-gold-500" : "text-white"
+              )}
+            >
               {plan.price}
             </div>
             <div className="text-xs opacity-80 mb-3">{plan.subtitle}</div>
@@ -156,23 +199,44 @@ export default async function PricingCards() {
             <ul className="mb-4 space-y-1 text-sm">
               {plan.features.map((feature, idx) => (
                 <li key={idx} className="flex items-center gap-2">
-                  <span className="text-green-400">✔</span>
+                  <span className="text-green-400" aria-hidden>
+                    ✔
+                  </span>
                   <span>{feature}</span>
                 </li>
               ))}
             </ul>
 
+            {/* Limited edition progress */}
+            {isLimited && (
+              <div className="mb-3">
+                <div className="h-2 w-full rounded-full bg-white/20 overflow-hidden">
+                  <div
+                    className="h-2 bg-plum-400"
+                    style={{ width: `${claimPct}%` }}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={claimPct}
+                    role="progressbar"
+                  />
+                </div>
+                <div className="mt-1 text-[10px] opacity-80">{claimPct}% claimed</div>
+              </div>
+            )}
+
             {/* CTA */}
             <a
-              href="#pay"
+              href={href}
               className={clsx(
                 "rounded-xl px-4 py-2 mt-auto font-bold text-center transition",
-                isElite
+                plan.accent === "gold"
                   ? "bg-gold-500 text-black hover:bg-gold-400 shadow-lg shadow-gold-500/40"
-                  : isLimited
+                  : plan.accent === "plum"
                   ? "bg-plum-400 text-black hover:bg-plum-500"
                   : "bg-mint-500 text-black hover:bg-mint-400"
               )}
+              rel="noopener noreferrer"
+              target="_blank"
             >
               {plan.cta}
             </a>

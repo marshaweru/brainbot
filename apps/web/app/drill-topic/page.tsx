@@ -1,16 +1,13 @@
 // apps/web/app/drill-topic/page.tsx
-const TG_BOT = "brainbotafrica_bot";
+const TG_BOT = "brainbotafrica_bot" as const;
 
-const PLAN_KEYS = {
-  free: "free",
-  lite: "lite",
-  steady: "steady",
-  serious: "serious",
-  elite: "elite",
-  limited: "limited",
-} as const;
+const PLAN_KEYS = ["free", "lite", "steady", "serious", "elite", "limited"] as const;
+type PlanKey = (typeof PLAN_KEYS)[number];
 
-type PlanKey = keyof typeof PLAN_KEYS;
+function toPlanKey(v: unknown): PlanKey {
+  const s = String(v ?? "free").toLowerCase();
+  return (PLAN_KEYS as readonly string[]).includes(s) ? (s as PlanKey) : "free";
+}
 
 export default function DrillTopicHandoff({
   searchParams,
@@ -18,8 +15,8 @@ export default function DrillTopicHandoff({
   searchParams?: Record<string, string | string[]>;
 }) {
   const raw = searchParams?.plan;
-  const plan = (Array.isArray(raw) ? raw[0] : raw ?? "free").toLowerCase();
-  const planKey = (PLAN_KEYS[plan as PlanKey] ?? PLAN_KEYS.free) as string;
+  const plan = Array.isArray(raw) ? raw[0] : raw;
+  const planKey = toPlanKey(plan);
 
   const startKey = `drill_${planKey}`;
   const deepLink = `https://t.me/${TG_BOT}?start=${encodeURIComponent(startKey)}`;
@@ -34,7 +31,7 @@ export default function DrillTopicHandoff({
 
           <p className="text-steel-200 max-w-2xl mx-auto mb-8">
             We’ll open BrainBot in Telegram and start a topic drill flow. Your current
-            plan will be tagged as <b>{plan.toUpperCase()}</b> for limits and access.
+            plan will be tagged as <b>{planKey.toUpperCase()}</b> for limits and access.
           </p>
 
           <a

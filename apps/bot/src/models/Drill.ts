@@ -1,4 +1,4 @@
-import mongoose, { Schema, InferSchemaType } from "mongoose";
+import mongoose, { Schema, InferSchemaType, model, Types } from "mongoose";
 
 const DrillSchema = new Schema(
   {
@@ -32,8 +32,9 @@ const DrillSchema = new Schema(
 // Index by user + topic for fast “repeat drills” queries
 DrillSchema.index({ telegramId: 1, subjectLabel: 1, topic: 1, createdAt: -1 });
 
-export type DrillDoc = InferSchemaType<typeof DrillSchema>;
+export type DrillDoc = InferSchemaType<typeof DrillSchema> & {
+  _id: Types.ObjectId;
+};
 
 export const DrillModel =
-  mongoose.models.Drill || mongoose.model<DrillDoc>("Drill", DrillSchema);
-// Drill model placeholder
+  mongoose.models.Drill || model("Drill", DrillSchema);

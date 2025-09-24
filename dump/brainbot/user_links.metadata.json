@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"wid":{"$numberInt":"1"}},"name":"user_links_wid_u","unique":true},{"v":{"$numberInt":"2"},"key":{"telegramId":{"$numberInt":"1"}},"name":"user_links_tg_u","unique":true}],"uuid":"00cb8a9aa34f4ee299d615d537ee027c","collectionName":"user_links","type":"collection"}

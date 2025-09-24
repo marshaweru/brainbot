@@ -1,4 +1,9 @@
-const SUBJECTS = [
+// apps/web/components/SubjectPicker.tsx
+"use client";
+
+import SubjectPickerMulti from "@/components/SubjectPickerMulti";
+
+const DEFAULT_SUBJECTS = [
   "Mathematics",
   "English",
   "Kiswahili",
@@ -8,35 +13,32 @@ const SUBJECTS = [
   "Geography",
   "History & Government",
   "CRE",
-  "Business Studies"
+  "Business Studies",
 ];
+
+type Props = {
+  value?: string;
+  onChange?: (subject: string) => void;
+  subjects?: string[];
+  className?: string;
+};
 
 export default function SubjectPicker({
   value,
-  onChange
-}: {
-  value?: string;
-  onChange?: (subject: string) => void;
-}) {
+  onChange,
+  subjects = DEFAULT_SUBJECTS,
+  className,
+}: Props) {
   return (
-    <div className="flex flex-col gap-2 mb-2">
-      <span className="font-bold text-blue-700">Pick a subject:</span>
-      <div className="flex flex-wrap gap-2">
-        {SUBJECTS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onChange?.(s)}
-            className={`rounded-lg px-4 py-2 font-semibold border ${
-              value === s
-                ? "bg-blue-600 text-white border-blue-800"
-                : "bg-white text-blue-700 border-blue-200"
-            } hover:bg-brand-500 hover:text-white transition`}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-    </div>
+    <SubjectPickerMulti
+      value={value ? [value] : []}
+      onChange={(list) => onChange?.(list[0] ?? "")}
+      subjects={subjects}
+      className={className}
+      maxSelect={1}
+      showActions={false}
+    />
   );
 }
+
+export { SubjectPickerMulti };

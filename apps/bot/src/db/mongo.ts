@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import { SessionModel } from "../models/Session.js";
 import { PerformanceModel } from "../models/Performance.js";
+import { DrillLogModel } from "../models/DrillLog.js";
 // import { UserPlanModel } from "../models/UserPlan"; // uncomment if you’ve defined it
 
 let pending: Promise<typeof mongoose> | null = null;
@@ -9,9 +10,9 @@ let pending: Promise<typeof mongoose> | null = null;
 async function ensureBotIndexes() {
   try {
     await Promise.allSettled([
-      SessionModel.syncIndexes(),      // ensures TTL + active session unique
-      PerformanceModel.syncIndexes(),  // ensures telegramId + createdAt
-      // UserPlanModel.syncIndexes(),   // if you have this model
+      SessionModel.syncIndexes(),
+      PerformanceModel.syncIndexes(),
+      DrillLogModel.syncIndexes(),   // 👈 add this
     ]);
     console.log("✅ Bot indexes ensured");
   } catch (e) {

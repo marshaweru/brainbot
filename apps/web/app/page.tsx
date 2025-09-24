@@ -1,18 +1,16 @@
-import React from "react";
+// apps/web/app/page.tsx
 import Link from "next/link";
-import PricingCards from "../components/PricingCards"; // 🔥 drop `.js`
-import KCSEBadge from "../components/KCSEBadge";       // 🔥 drop `.js`
-// import KCSECountdown from "../components/KCSECountdown"; // not used
-import ShareButtons from "../components/ShareButtons"; // 🔥 drop `.js`
+import PricingCards from "@/components/PricingCards";
+import KCSEBadge from "@/components/KCSEBadge";
+import ShareButtons from "@/components/ShareButtons";
 
 export default function HomePage() {
   return (
     <main className="bg-gradient-to-br from-ink-900 via-ink-800 to-ink-900 text-white">
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="min-h-screen px-4 pt-12 pb-10 flex items-center">
         <div className="glass mx-auto w-[95vw] max-w-6xl rounded-2xl shadow-glass p-8 md:p-12">
-          {/* Countdown pill */}
-          <KCSEBadge />
+          <div className="mb-4"><KCSEBadge /></div>
 
           <h1 className="text-4xl font-extrabold leading-tight">
             <span className="text-gold-500">BrainBot</span> —{" "}
@@ -21,50 +19,41 @@ export default function HomePage() {
             </span>
           </h1>
 
-          <div className="mt-4">
-            <p className="text-steel-200 leading-relaxed max-w-3xl">
+          <div className="mt-4 space-y-2 text-steel-200 leading-relaxed max-w-3xl">
+            <p>
               KCSE isn’t just grades — it’s the gateway to university, scholarships,
               life-changing opportunities, and career freedom. Only 3 more KCSE sittings in
               2025, 2026 and 2027 before the system changes — the pressure is real, <strong>but so is
               your opportunity</strong>. Train smart now, <strong>before it’s too late.</strong>
             </p>
+            <p>
+              <b>KCSE Mode:</b> Start with a real exam, get examiner feedback, and upgrade for more.
+            </p>
+            <p>🚀 <b>3-hour free session</b> (all features). No registration required.</p>
+            <p><b>10 core subjects.</b> Only KCSE. No fluff. All glass.</p>
           </div>
 
-          <div className="mt-4">
-            <p className="text-steel-200 mt-2">
-              <b>KCSE Mode:</b> Start with a real exam, get examiner feedback, and
-              upgrade for more.
-            </p>
-            <p className="text-steel-200">
-              🚀 <b>3-hour free session</b> (all features). No registration required.
-            </p>
-            <p className="text-steel-200">
-              <b>10 core subjects.</b> Only KCSE. No fluff. All glass.
-            </p>
-          </div>
-
-          {/* CTA buttons (clean, no glow) */}
+          {/* CTAs */}
           <div className="flex gap-4 w-full mt-6 mb-6">
             <Link
               href="/session?plan=free"
               className="flex-1 rounded-2xl text-lg px-6 py-3 font-bold
-                         bg-gold-500 text-ink-900 hover:bg-gold-400 active:scale-95
-                         transition transform"
+                         bg-gold-500 text-ink-900 hover:bg-gold-400 active:scale-95 transition"
+              aria-label="Start a free 3-hour KCSE session in Telegram"
             >
               Start Free 3-Hour Session
             </Link>
 
-            <Link
+            <a
               href="#pricing"
               className="flex-1 rounded-2xl text-lg px-6 py-3 font-bold
                          border border-plum-400 text-plum-400
                          bg-white/5 hover:bg-white/10 active:scale-95 transition"
             >
               See Pricing
-            </Link>
+            </a>
           </div>
 
-          {/* Share buttons row */}
           <div className="mt-4">
             <ShareButtons />
           </div>
@@ -75,7 +64,7 @@ export default function HomePage() {
             <a
               href="https://t.me/brainbotafrica_bot"
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="underline text-plum-400 hover:text-plum-500"
             >
               @brainbotafrica_bot
@@ -84,22 +73,20 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Pricing Section */}
+      {/* Pricing */}
       <section id="pricing" className="px-4 pt-6 pb-16 max-w-7xl mx-auto">
-        <h2 className="text-3xl font-bold text-center mb-8">
-          Choose Your Prep Pass
-        </h2>
+        <h2 className="text-3xl font-bold text-center mb-8">Choose Your Prep Pass</h2>
+
         <PricingCards />
 
-        {/* Footer Paybill badge */}
-        <div className="mt-12 flex flex-col items-center gap-6 text-sm text-gray-300">
+        {/* Paybill badge */}
+        <div className="mt-12 flex flex-col items-center gap-6 text-sm text-steel-300">
           <div className="glass rounded-xl px-6 py-4 text-center shadow-md">
-            <div className="text-xs uppercase tracking-wider text-blue-400 font-bold mb-1">
+            <div className="text-xs uppercase tracking-wider text-mint-400 font-bold mb-1">
               Official Payment
             </div>
-            <div className="text-lg font-extrabold text-blue-300">
-              Paybill:{" "}
-              <span className="font-mono text-2xl text-yellow-300">4168557</span>
+            <div className="text-lg font-extrabold text-gold-300">
+              Paybill: <span className="font-mono text-2xl text-gold-400">4168557</span>
             </div>
             <div className="text-sm">
               Account Name: <span className="font-semibold">Rizzline Africa</span>
@@ -110,15 +97,12 @@ export default function HomePage() {
           </div>
 
           <div className="flex gap-6">
-            <a
-              href="mailto:chariee@proton.me"
-              className="underline hover:text-blue-400"
-            >
+            <a href="mailto:chariee@proton.me" className="underline hover:text-mint-400">
               Contact
             </a>
-            <a href="/privacy" className="underline hover:text-blue-400">
+            <Link href="/privacy" className="underline hover:text-mint-400">
               Privacy
-            </a>
+            </Link>
           </div>
         </div>
       </section>

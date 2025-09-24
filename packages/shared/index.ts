@@ -1,6 +1,6 @@
-// packages/shared/index.ts
+// Root exports: safe utilities only.
+// Always add explicit .js extensions to keep Node ESM happy.
 
-// Be explicit to avoid name clashes AND add .js extensions
 export {
   PLANS,
   PLAN_LABELS,
@@ -18,6 +18,5 @@ export type { SubjectSlug, SubjectLabel, SubjectName } from "./subjects.js";
 export * from "./markingPrompt.js";
 export * from "./types.js";
 
-
-// ✅ expose shared DB index helper
-export * from "./db/ensureIndexes.js";
+// 🚫 Do NOT export DB helpers here!
+// Use `import { getDb } from "@brainbot/shared/db"` instead.

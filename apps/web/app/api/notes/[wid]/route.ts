@@ -1,14 +1,34 @@
+// apps/web/app/api/notes/[wid]/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-export async function GET(_: Request, { params }: { params: { wid: string } }) {
-  const database = await db();
-  const link = await database.collection("user_links").findOne({ wid: params.wid });
-  if (!link?.telegramId) return NextResponse.json({ ok: true, topics: [] });
+type LinkDoc = { wid: string; telegramId?: number };
+type FeedbackDoc = { telegramId: number; weakTopics?: string[] };
 
-  const latest = await database
-    .collection("latest_feedback")
-    .findOne({ telegramId: link.telegramId });
+export async function GET(_: Request, { params }: { params: { wid?: string } }) {
+  try {
+    const wid = (params.wid || "").trim();
+    if (!wid) {
+      return NextResponse.json({ ok: false, msg: "missing wid" }, { status: 400 });
+    }
 
-  return NextResponse.json({ ok: true, topics: latest?.weakTopics ?? [] });
+    const database = await db();
+    const links = database.collection<LinkDoc>("user_links");
+    const latest = database.collection<FeedbackDoc>("latest_feedback");
+
+    const link = await links.findOne({ wid }, { projection: { telegramId: 1 } });
+    if (!link?.telegramId) {
+      return NextResponse.json({ ok: true, topics: [] });
+    }
+
+    const row = await latest.findOne(
+      { telegramId: link.telegramId },
+      { projection: { weakTopics: 1 } }
+    );
+
+    return NextResponse.json({ ok: true, topics: row?.weakTopics ?? [] });
+  } catch (err) {
+    console.error("GET /api/notes/[wid] failed:", err);
+    return NextResponse.json({ ok: false, msg: "server error" }, { status: 500 });
+  }
 }

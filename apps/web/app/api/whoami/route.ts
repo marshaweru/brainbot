@@ -1,11 +1,31 @@
+export const dynamic = 'force-dynamic';
+// apps/web/app/api/whoami/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-export async function GET(req: Request) {
-  const wid = new URL(req.url).searchParams.get("wid");
-  if (!wid) return NextResponse.json({ ok: false }, { status: 400 });
+export const runtime = "nodejs";
 
-  const database = await db();
-  const link = await database.collection("user_links").findOne({ wid });
-  return NextResponse.json({ ok: true, telegramId: link?.telegramId ?? null });
+type LinkDoc = { wid: string; telegramId?: number | string | null };
+
+export async function GET(req: Request) {
+  try {
+    const wid = new URL(req.url).searchParams.get("wid")?.trim();
+    if (!wid) {
+      return NextResponse.json({ ok: false, msg: "missing wid" }, { status: 400 });
+    }
+
+    const database = await db();
+    const link = await database
+      .collection<LinkDoc>("user_links")
+      .findOne({ wid }, { projection: { telegramId: 1 } });
+
+    return NextResponse.json({
+      ok: true,
+      wid,
+      telegramId: link?.telegramId ?? null,
+    });
+  } catch (err) {
+    console.error("GET /api/whoami failed:", err);
+    return NextResponse.json({ ok: false, msg: "server error" }, { status: 500 });
+  }
 }
