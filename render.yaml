@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: brainbot-bot
+    env: node
+    rootDir: .
+    buildCommand: |
+      bash -lc '
+      set -euxo pipefail
+      corepack enable
+      corepack prepare pnpm@9.10.0 --activate
+      pnpm install --frozen-lockfile
+      pnpm -F @brainbot/shared build
+      pnpm -F @brainbot/bot build
+      '
+    startCommand: pnpm -F @brainbot/bot start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: BOT_MODE
+        value: polling
+      - key: MONGODB_DB
+        value: brainbot
+      # add TELEGRAM_BOT_TOKEN, MONGODB_URI in the dashboard or here
