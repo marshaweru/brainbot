@@ -9,7 +9,7 @@ export type ConfirmResp = {
   already?: boolean;
   wid?: string;
   plan?: string;
-  telegramId?: number;
+  telegramId?: string;   // 🔄 string, not number
   error?: string;
 };
 
@@ -19,7 +19,7 @@ function b64urlToStr(b64url: string): string {
   return Buffer.from(b64, "base64").toString("utf8");
 }
 
-export async function confirmLinkOnWeb(token: string, telegramId: number): Promise<ConfirmResp> {
+export async function confirmLinkOnWeb(token: string, telegramId: string): Promise<ConfirmResp> {
   try {
     const t = token.startsWith("st_") ? token.slice(3) : token;
 

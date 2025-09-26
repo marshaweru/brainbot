@@ -5,8 +5,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
 
-    "rootDir": "src",
-    "outDir": "dist",
+    "rootDir": "./src",
+    "outDir": "./dist",
 
     "types": ["node"],
     "strict": true,
@@ -18,7 +18,8 @@
 
     "declaration": false,
     "declarationMap": false,
-    "composite": false
+    "composite": false,
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "src/pdf/**"]

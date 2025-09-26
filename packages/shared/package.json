@@ -10,13 +10,11 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.js"
+      "default": "./dist/index.js"
     },
     "./db": {
       "types": "./dist/db/index.d.ts",
-      "import": "./dist/db/index.js",
-      "require": "./dist/db/index.js"
+      "default": "./dist/db/index.js"
     }
   },
 
@@ -24,8 +22,8 @@
   "sideEffects": false,
 
   "scripts": {
-    "build": "tsc -b",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "build": "rimraf dist && tsc -p tsconfig.json"
   },
 
   "peerDependencies": {

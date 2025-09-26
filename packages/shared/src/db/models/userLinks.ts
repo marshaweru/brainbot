@@ -2,7 +2,7 @@ import type { Db, Collection } from "mongodb";
 
 export type UserLink = {
   wid: string;
-  telegramId?: number;
+  telegramId?: string;   // 🔄 switched to string everywhere
   starts?: number;
   lastStartAt?: Date;
   ua?: string;
@@ -19,6 +19,6 @@ export function userLinks(db: Db): Collection<UserLink> {
 
 export async function ensureUserLinksIndexes(db: Db) {
   const col = userLinks(db);
-  await col.createIndex({ wid: 1 }, { unique: true });
-  await col.createIndex({ telegramId: 1 }, { sparse: true });
+  await col.createIndex({ wid: 1 }, { unique: true, name: "user_links_wid_u" });
+  await col.createIndex({ telegramId: 1 }, { sparse: true, name: "user_links_tg_u" });
 }

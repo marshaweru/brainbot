@@ -6,16 +6,17 @@
   "main": "dist/index.js",
   "packageManager": "pnpm@9.10.0",
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
+    "clean": "rimraf dist",
     "dev": "tsx watch --no-check src/index.ts",
-    "enrich:insights": "tsx apps/bot/src/scripts/enrich-insights.ts",
-    "build": "tsc",
+    "build": "rimraf dist && tsc -p tsconfig.json",
     "build:all": "pnpm --filter @brainbot/shared build && pnpm --filter @brainbot/bot build",
     "prestart": "pnpm run build:all",
     "start": "node dist/index.js",
     "prompt:lesson": "tsx src/scripts/prompt-smoke.ts",
+    "enrich:insights": "tsx src/scripts/enrich-insights.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -38,7 +39,7 @@
     "@types/handlebars": "^4.1.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.19.17",
-    "@types/puppeteer": "^5.4.7",
+    "rimraf": "^5.0.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"

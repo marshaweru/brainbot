@@ -3,6 +3,6 @@ export function userLinks(db) {
 }
 export async function ensureUserLinksIndexes(db) {
     const col = userLinks(db);
-    await col.createIndex({ wid: 1 }, { unique: true });
-    await col.createIndex({ telegramId: 1 }, { sparse: true });
+    await col.createIndex({ wid: 1 }, { unique: true, name: "user_links_wid_u" });
+    await col.createIndex({ telegramId: 1 }, { sparse: true, name: "user_links_tg_u" });
 }

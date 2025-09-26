@@ -6,12 +6,10 @@ async function tryIndex(col, keys, opts) {
         await col.createIndex(keys, opts);
     }
     catch (err) {
-        // Mongo uses different codes/names for index conflicts
         if (err?.codeName === "IndexOptionsConflict" ||
             err?.codeName === "IndexKeySpecsConflict" ||
-            err?.code === 85 || // IndexOptionsConflict
-            err?.code === 86 // IndexKeySpecsConflict
-        ) {
+            err?.code === 85 ||
+            err?.code === 86) {
             console.warn(`⚠️  Skipped conflicting index on ${col.collectionName}: ${opts.name}`);
             return;
         }

@@ -146,9 +146,9 @@ importers:
       '@types/node':
         specifier: ^20.19.17
         version: 20.19.17
-      '@types/puppeteer':
-        specifier: ^5.4.7
-        version: 5.4.7
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@20.19.17)(typescript@5.9.2)
@@ -731,9 +731,6 @@ packages:
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
-
-  '@types/puppeteer@5.4.7':
-    resolution: {integrity: sha512-JdGWZZYL0vKapXF4oQTC5hLVNfOgdPrqeZ1BiQnGk5cB7HeE91EWUiTdVSdQPobRN8rIcdffjiOgCYJ/S8QrnQ==}
 
   '@types/qs@6.14.0':
     resolution: {integrity: sha512-eOunJqu0K1923aExK6y8p6fsihYEn/BYuQ4g0CxAAgFc4b/ZLN4CrsRZ55srTdqoiLzU2B2evC+apEIxprEzkQ==}
@@ -2890,10 +2887,6 @@ snapshots:
       '@types/node': 20.19.17
 
   '@types/prop-types@15.7.15': {}
-
-  '@types/puppeteer@5.4.7':
-    dependencies:
-      '@types/node': 20.19.17
 
   '@types/qs@6.14.0': {}
 
