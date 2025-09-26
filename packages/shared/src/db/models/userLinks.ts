@@ -1,8 +1,8 @@
-import type { Db, Collection } from "mongodb";
+﻿import type { Db, Collection } from "mongodb";
 
 export type UserLink = {
   wid: string;
-  telegramId?: string;   // 🔄 switched to string everywhere
+  telegramId?: string;
   starts?: number;
   lastStartAt?: Date;
   ua?: string;
