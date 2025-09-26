@@ -1,62 +1,107 @@
 // apps/bot/src/index.ts
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 
-import { registerStart } from "./handlers/start.js";                  // /start st_<jwt> or drill_<topic>
-import { registerSessionStart } from "./handlers/session-start.js";   // /session + subject pick + timers + paper
-import { registerUploads } from "./handlers/uploads.js";              // photo/voice/document/text with window rules
-import { registerSessionFinish } from "./handlers/session-finish.js"; // /finish → marking + feedback + pdf + notes/drills
-import { registerRemark } from "./handlers/remark.js";                // /remark <sessionId> (re-mark past session)
-import { registerExportPdf } from "./handlers/export-pdf.js";         // /pdf
-import { registerNotesHandlers } from "./handlers/notes.js";          // /notes
-import { registerDrillHandlers } from "./handlers/drills.js";                  // /drill + deep-link drill_<topic>
-import { registerStatsHandlers } from "./handlers/stats.js";          // /stats
-import { registerInsightsHandlers } from "./handlers/insights.js";    // /insights
+import { registerLogin } from "./handlers/login.js";
+import { registerStart } from "./handlers/start.js";
+import { registerSessionStart } from "./handlers/session-start.js";
+import { registerUploads } from "./handlers/uploads.js";
+import { registerSessionFinish } from "./handlers/session-finish.js";
+import { registerRemark } from "./handlers/remark.js";
+import { registerExportPdf } from "./handlers/export-pdf.js";
+import { registerNotesHandlers } from "./handlers/notes.js";
+import { registerDrillHandlers } from "./handlers/drills.js";
+import { registerStatsHandlers } from "./handlers/stats.js";
+import { registerAdminInsights } from "./handlers/admin-insights.js";
+import { registerProgressHandlers } from "./handlers/progress.js";
+import { registerLessonPlan } from "./handlers/lesson-plan.js";
+import { registerInsights } from "./handlers/insights.js";
+import { registerMark } from "./handlers/mark.js";
+import { registerFeedback } from "./handlers/feedback.js";
 
 import { planFromAmount } from "./repo/planRepo.js";
 import { stkPush, toMSISDN } from "./lib/mpesa.js";
 import { notifyAdmin } from "./lib/notify.js";
 import { watchUploadCleaner } from "./services/upload-cleaner.js";
 
-import { connectMongo } from "./db/mongo.js";
-import { SessionModel } from "./models/Session.js";
+import { connectMongo, wireMongoShutdownSignals, closeMongo } from "./db/mongo.js";
 
 // MPESA routes (Express)
 import { router as stkInitiateRouter } from "./routes/mpesa/stk-initiate.js";
 import { router as c2bConfirmRouter } from "./routes/mpesa/c2b-confirmation.js";
 
-// ----------------- Env & Mode -----------------
+/* ----------------- Env & Mode ----------------- */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-if (!BOT_TOKEN) throw new Error("❌ TELEGRAM_BOT_TOKEN is not set");
-
 const MODE = (process.env.BOT_MODE ?? "polling").toLowerCase() as "polling" | "webhook";
-const PUBLIC_URL = process.env.PUBLIC_URL; // required in webhook mode
+const PUBLIC_URL = process.env.PUBLIC_URL;
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH ?? "/bot/webhook";
-
 const PORT = Number(process.env.PORT || process.env.BOT_PORT || 8080);
+const TG_SECRET = process.env.TG_SECRET;
 
-// ----------------- Helpers -----------------
+/* minimal env guard */
+(function assertEnv() {
+  if (!BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is required");
+  if (MODE === "webhook" && !PUBLIC_URL) throw new Error("PUBLIC_URL is required in webhook mode");
+  if (MODE === "webhook" && !TG_SECRET) console.warn("⚠️ TG_SECRET not set; webhook will be less secure");
+})();
+
+/* ----------------- Helpers ----------------- */
 function swallow<T>(p: Promise<T>) {
   return p.catch((e: any) => {
     console.warn("[bot] non-fatal:", e?.code || e?.message || e);
     return null as any;
   });
 }
-
 const escHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// ----------------- Telegraf Bot -----------------
-const bot = new Telegraf(BOT_TOKEN);
+/** tiny per-IP rate limit (burst N / window) with TTL sweep */
+function rateLimit({ limit = 5, windowMs = 60_000 } = {}) {
+  const hits = new Map<string, { c: number; t: number }>();
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, rec] of hits) if (now - rec.t > windowMs) hits.delete(ip);
+  }, Math.max(10_000, Math.floor(windowMs / 3)));
+  sweep.unref?.();
 
+  return (req: Request, res: Response, next: NextFunction) => {
+    const now = Date.now();
+    const ip = (req.ip || req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "unknown")
+      .toString()
+      .split(",")[0]
+      .trim();
+    const rec = hits.get(ip);
+    if (!rec || now - rec.t > windowMs) {
+      hits.set(ip, { c: 1, t: now });
+      return next();
+    }
+    if (rec.c >= limit) return res.status(429).json({ ok: false, error: "Too many requests" });
+    rec.c++;
+    next();
+  };
+}
+
+/** TTL sweeper for arbitrary maps */
+function installTTLMapSweep<K, V extends { at: number }>(map: Map<K, V>, ttlMs: number, sweepMs = 60_000) {
+  const h = setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of map) if (now - v.at > ttlMs) map.delete(k);
+  }, sweepMs);
+  h.unref?.();
+}
+
+/* ----------------- Telegraf Bot ----------------- */
+const bot = new Telegraf(BOT_TOKEN!);
 bot.catch((err, ctx) => {
-  console.error("❌ Bot error for update", ctx?.update?.update_id, err);
+  console.error("Bot error:", { update: ctx?.update?.update_id, msg: (err as any)?.message });
 });
 
-// Core handlers
+/* Core handlers */
+registerLogin(bot);
 registerStart(bot);
 registerSessionStart(bot);
 registerUploads(bot);
@@ -64,12 +109,18 @@ registerSessionFinish(bot);
 registerRemark(bot);
 registerExportPdf(bot);
 registerNotesHandlers(bot);
-registerDrillHandlers(bot); // ✅ new drill flow (command + deep-link)
+registerDrillHandlers(bot);
 registerStatsHandlers(bot);
-registerInsightsHandlers(bot);
+registerAdminInsights(bot);
+registerProgressHandlers(bot);
+registerLessonPlan(bot); // ← keep only one
+registerInsights(bot);
+registerMark(bot);
+registerFeedback(bot);
 
-// ----------------- Payments / Upgrade UX (Bot-side) -----------------
+/* ----------------- Payments / Upgrade UX (Bot-side) ----------------- */
 const pendingCheckout = new Map<string, { amount: number; tier: string; at: number }>();
+installTTLMapSweep(pendingCheckout, 10 * 60_000); // expire pending cart after 10 minutes
 
 bot.command("upgrade", async (ctx) => {
   const kb = Markup.inlineKeyboard([
@@ -79,7 +130,6 @@ bot.command("upgrade", async (ctx) => {
     [Markup.button.callback("Get Limited — KES 1,499", "buy:1499")],
     [Markup.button.callback("Go Elite — KES 5,999", "buy:5999")],
   ]);
-
   await ctx.replyWithHTML(
     `<b>Choose a plan and pay via M-PESA (STK push)</b>
 Paybill <b>4168557</b> • Ref = your Telegram ID`,
@@ -92,25 +142,18 @@ bot.action(/^buy:(\d+)$/, async (ctx) => {
   const map = planFromAmount(amount);
   if (!map) {
     await ctx.answerCbQuery("Unknown amount. Ping support.");
-    await notifyAdmin(
-      `⚠️ Unknown pricing button pressed\n<b>User:</b> ${ctx.from?.id}\n<b>Amount:</b> KES ${amount}`
-    );
+    await notifyAdmin(`⚠️ Unknown pricing button pressed\n<b>User:</b> ${ctx.from?.id}\n<b>Amount:</b> KES ${amount}`);
     return;
   }
   const tier = map.tier;
   const uid = String(ctx.from?.id ?? "");
-
   pendingCheckout.set(uid, { amount, tier, at: Date.now() });
 
   await ctx.answerCbQuery();
   await ctx.replyWithHTML(
     `You chose <b>${tier}</b> — KES <b>${amount.toLocaleString()}</b>.
-
 Tap the button below to share your M-PESA number (recommended), or type it here in the format 07XXXXXXXX.`,
-    Markup.keyboard([
-      [Markup.button.contactRequest("📱 Share my M-PESA number")],
-      [Markup.button.text("Cancel")],
-    ])
+    Markup.keyboard([[Markup.button.contactRequest("📱 Share my M-PESA number")], [Markup.button.text("Cancel")]])
       .oneTime()
       .resize()
   );
@@ -137,19 +180,12 @@ bot.on(message("contact"), async (ctx) => {
   await ctx.reply("⚡ Sending STK push…", Markup.removeKeyboard());
 
   try {
-    await stkPush({
-      amount: pend.amount,
-      phone,
-      accountRef: uid,
-      description: `BrainBot ${pend.tier}`,
-    });
+    await stkPush({ amount: pend.amount, phone, accountRef: uid, description: `BrainBot ${pend.tier}` });
     await ctx.replyWithHTML(`✅ STK sent to <b>${phone}</b>. Approve on your phone.`);
   } catch (e: any) {
     const msg = e?.response?.data ? JSON.stringify(e.response.data) : String(e);
     console.error("stkPush error:", msg);
-    await ctx.reply(
-      "❌ Could not send STK. Check your number and try again, or use Paybill 4168557 manually."
-    );
+    await ctx.reply("❌ Could not send STK. Check your number and try again, or use Paybill 4168557 manually.");
     await notifyAdmin(
       `💥 STK push FAILED\n<b>User:</b> ${uid}\n<b>Amount:</b> KES ${pend.amount}\n<b>Phone:</b> ${phone}\n<pre>${escHtml(
         msg
@@ -164,8 +200,8 @@ bot.on(message("contact"), async (ctx) => {
 bot.on(message("text"), async (ctx, next) => {
   const uid = String(ctx.from?.id ?? "");
   const text = (ctx.message as any).text?.trim() ?? "";
-
   const pend = pendingCheckout.get(uid);
+
   if (pend && /^(\+?254|0|7)\d{8,9}$/.test(text)) {
     let phone: string;
     try {
@@ -177,14 +213,8 @@ bot.on(message("text"), async (ctx, next) => {
     }
 
     await ctx.reply("⚡ Sending STK push…", Markup.removeKeyboard());
-
     try {
-      await stkPush({
-        amount: pend.amount,
-        phone,
-        accountRef: uid,
-        description: `BrainBot ${pend.tier}`,
-      });
+      await stkPush({ amount: pend.amount, phone, accountRef: uid, description: `BrainBot ${pend.tier}` });
       await ctx.replyWithHTML(`✅ STK sent to <b>${phone}</b>. Approve on your phone.`);
     } catch (e: any) {
       const msg = e?.response?.data ? JSON.stringify(e.response.data) : String(e);
@@ -204,71 +234,95 @@ bot.on(message("text"), async (ctx, next) => {
   return next();
 });
 
-// ----------------- Express (health + M-PESA + optional webhook) -----------------
+/* ----------------- Express (health + M-PESA + optional webhook) ----------------- */
 const app = express();
 app.disable("x-powered-by");
+app.set("trust proxy", true);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
-app.set("trust proxy", true);
+
+// minimal access log (skip health noise)
+app.use((req, _res, next) => {
+  if (req.path.startsWith("/healthz")) return next();
+  console.log(`${req.method} ${req.path} :: ip=${req.ip}`);
+  next();
+});
 
 // Health
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// MPESA endpoints
-app.use("/mpesa/stk-initiate", stkInitiateRouter);
-app.use("/mpesa/c2b-confirmation", c2bConfirmRouter);
+// M-PESA endpoints (rate-limited)
+const mpesaLimiter = rateLimit({ limit: 5, windowMs: 60_000 });
+app.use("/mpesa/stk-initiate", mpesaLimiter, stkInitiateRouter);
+app.use("/mpesa/c2b-confirmation", mpesaLimiter, c2bConfirmRouter);
 
-// If running in webhook mode, attach Telegram webhook handler
-app.post(WEBHOOK_PATH, express.json(), (req, res) => {
-  bot.handleUpdate(req.body, res).catch((err) => {
-    console.error("Webhook error:", err);
-    res.sendStatus(500);
+// Telegram webhook (webhook mode)
+if (MODE === "webhook") {
+  const checkTelegramSecret: express.RequestHandler = (req, res, next) => {
+    if (!TG_SECRET) return next(); // already warned; allow if unset
+    const got = req.header("x-telegram-bot-api-secret-token");
+    if (got !== TG_SECRET) return res.status(403).json({ ok: false, error: "Bad secret" });
+    next();
+  };
+  const webhook = bot.webhookCallback(WEBHOOK_PATH);
+  app.post(WEBHOOK_PATH, checkTelegramSecret, (req, res) => {
+    webhook(req, res, (err?: unknown) => {
+      if (err) {
+        console.error("Webhook error:", (err as any)?.message || err);
+        res.sendStatus(500);
+      }
+      // else Telegraf already responded 200
+    });
   });
-});
+}
 
-// ----------------- Bootstrap -----------------
+/* ----------------- Bootstrap ----------------- */
 (async () => {
   try {
     await connectMongo();
-
-    // indexes (safe/settled to avoid crashing if already exist)
-    await Promise.allSettled([SessionModel.syncIndexes()]);
+    wireMongoShutdownSignals();
 
     const me = await bot.telegram.getMe();
     console.log(`🔑 Auth OK: @${me.username} (id ${me.id})`);
 
-    // cleaner after DB is ready
     watchUploadCleaner();
 
-    // Start HTTP server
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`🌐 HTTP server listening on :${PORT}`);
       console.log(`   • GET  /healthz`);
       console.log(`   • POST /mpesa/stk-initiate`);
       console.log(`   • POST /mpesa/c2b-confirmation`);
-      if (MODE === "webhook") {
-        console.log(`   • POST ${WEBHOOK_PATH} (Telegram webhook)`);
-      }
+      if (MODE === "webhook") console.log(`   • POST ${WEBHOOK_PATH} (Telegram webhook)`);
     });
 
     if (MODE === "polling") {
-      // Local: network to api.telegram.org can be flaky → swallow timeouts
       await swallow(bot.telegram.deleteWebhook({ drop_pending_updates: true }));
       await bot.launch();
       console.log("🚀 BrainBot Telegram bot running (long-polling)!");
     } else {
-      // Render/webhook mode
       await swallow(
         bot.telegram.setWebhook(`${PUBLIC_URL}${WEBHOOK_PATH}`, {
-          secret_token: process.env.TG_SECRET,
+          secret_token: TG_SECRET,
         })
       );
       console.log("🚀 BrainBot Telegram bot running (webhook)!");
     }
+
+    // graceful shutdown for bot + HTTP + Mongo
+    const stop = async (sig: NodeJS.Signals) => {
+      try {
+        console.log(`\n⛔ ${sig} received`);
+        await bot.stop(sig);
+        await new Promise<void>((r) => server.close(() => r()));
+        await closeMongo();
+      } finally {
+        process.exit(0);
+      }
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
   } catch (err) {
-    console.error("💥 startup error:", err);
+    console.error("💥 startup error:", (err as any)?.message || err);
+    process.exit(1);
   }
 })();
-
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));

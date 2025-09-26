@@ -1,5 +1,7 @@
-import mongoose, { Schema, InferSchemaType } from "mongoose";
+// apps/bot/src/models/UserPlan.ts
+import mongoose, { Schema, type Model, type InferSchemaType } from "mongoose";
 
+// Keep schema minimal; trial window is set in repo.getUserPlan()
 const UserPlanSchema = new Schema(
   {
     telegramId: { type: String, unique: true, index: true, required: true },
@@ -9,14 +11,24 @@ const UserPlanSchema = new Schema(
       default: "free",
       index: true,
     },
-    expiresAt: { type: Date, default: () => new Date(Date.now() + 3 * 3600 * 1000) }, // free trial 3h
+    // null = lifetime. Trial expiry is set in code, not as a schema default.
+    expiresAt: { type: Date, default: null },
     papersUsed: { type: Number, default: 0 },
     lastSession: { type: Date, default: null },
+
+    // optional provenance for upgrades (receipts, txn ids, etc.)
+    receipts: { type: [Schema.Types.Mixed], default: [] },
   },
-  { timestamps: true }
+  {
+    timestamps: true, // adds createdAt, updatedAt
+    versionKey: false,
+  }
 );
 
-export type UserPlanDoc = InferSchemaType<typeof UserPlanSchema>;
+// Strong TS types
+export type UserPlanDoc = InferSchemaType<typeof UserPlanSchema>; // { telegramId, tier, expiresAt, ... }
+export type UserPlanModelType = Model<UserPlanDoc>;
 
-export const UserPlanModel =
-  mongoose.models.UserPlan || mongoose.model<UserPlanDoc>("UserPlan", UserPlanSchema);
+export const UserPlanModel: UserPlanModelType =
+  (mongoose.models.UserPlan as UserPlanModelType) ||
+  mongoose.model<UserPlanDoc, UserPlanModelType>("UserPlan", UserPlanSchema);

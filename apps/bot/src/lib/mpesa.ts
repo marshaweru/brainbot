@@ -1,57 +1,36 @@
 // apps/bot/src/lib/mpesa.ts
-// Minimal Daraja client for STK Push with a few quality-of-life upgrades.
+// Daraja (M-PESA) STK Push client with guarded envs, timeouts, and structured errors.
 
 type Env = "production" | "sandbox";
 
-const ENV = ((process.env.DARAJA_ENV as Env) || "sandbox").toLowerCase() as Env;
+const ENV = ((process.env.MPESA_ENV || process.env.DARAJA_ENV || "sandbox") as string)
+  .toLowerCase() as Env;
+
 const BASE =
-  ENV === "production"
-    ? "https://api.safaricom.co.ke"
-    : "https://sandbox.safaricom.co.ke";
+  ENV === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
 
 const CONSUMER_KEY =
-  process.env.DARAJA_CONSUMER_KEY ||
-  process.env.MPESA_CONSUMER_KEY ||
-  "";
+  process.env.MPESA_CONSUMER_KEY || process.env.DARAJA_CONSUMER_KEY || "";
 const CONSUMER_SECRET =
-  process.env.DARAJA_CONSUMER_SECRET ||
-  process.env.MPESA_CONSUMER_SECRET ||
-  "";
+  process.env.MPESA_CONSUMER_SECRET || process.env.DARAJA_CONSUMER_SECRET || "";
 const SHORTCODE =
-  process.env.DARAJA_SHORTCODE ||
-  process.env.MPESA_SHORTCODE ||
-  process.env.PAYBILL ||
-  "4168557";
-const PASSKEY =
-  process.env.DARAJA_PASSKEY ||
-  process.env.MPESA_PASSKEY ||
-  "";
-const CALLBACK_URL =
-  process.env.DARAJA_CALLBACK_URL ||
-  process.env.MPESA_CALLBACK_URL ||
-  "";
+  process.env.MPESA_SHORTCODE || process.env.DARAJA_SHORTCODE || process.env.PAYBILL || "4168557";
+const PASSKEY = process.env.MPESA_PASSKEY || process.env.DARAJA_PASSKEY || "";
+const CALLBACK_URL = process.env.MPESA_CALLBACK_URL || process.env.DARAJA_CALLBACK_URL || "";
 
-// --- tiny utils ----------------------------------------------------------
-const TIMEOUT_MS = Math.max(
-  5000,
-  Number(process.env.DARAJA_HTTP_TIMEOUT_MS ?? 15000)
-);
+// Optional: shared secret that Daraja will include back to you (proxy via gateway)
+const CALLBACK_SECRET = (process.env.MPESA_CALLBACK_SECRET || "").trim();
 
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
-}
+// Debug: set MPESA_DEBUG=1 to log sanitized payloads/responses
+const DEBUG = (process.env.MPESA_DEBUG || "") === "1";
 
-function withTimeout(p: Promise<Response>, ms = TIMEOUT_MS): Promise<Response> {
-  const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), ms);
-  // @ts-ignore node18 fetch supports signal
-  return Promise.race([
-    p,
-    new Promise<Response>((_, rej) =>
-      setTimeout(() => rej(new Error(`Daraja request timed out after ${ms}ms`)), ms)
-    ),
-  ]).finally(() => clearTimeout(id)) as Promise<Response>;
-}
+// Tunables
+const TIMEOUT_MS = Math.max(5_000, Number(process.env.MPESA_HTTP_TIMEOUT_MS ?? 15_000));
+const USER_AGENT = "BrainBot/1.0 (+https://brainbot.africa)";
+
+// ---------- utils ----------
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const nowSec = () => Math.floor(Date.now() / 1000);
 
 function yyyymmddHHMMSS(d = new Date()) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -65,62 +44,110 @@ function yyyymmddHHMMSS(d = new Date()) {
   );
 }
 
-// --- token cache ---------------------------------------------------------
+async function withTimeout<T>(p: Promise<T>, ms = TIMEOUT_MS): Promise<T> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    // @ts-ignore: Node 18 fetch supports signal
+    return await (p as any);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- Error taxonomy ----------
+export class MpesaError extends Error {
+  kind:
+    | "env"
+    | "auth"
+    | "timeout"
+    | "http"
+    | "bad_response"
+    | "validation"
+    | "unknown";
+  status?: number;
+  body?: string;
+  constructor(msg: string, kind: MpesaError["kind"], extra?: Partial<MpesaError>) {
+    super(msg);
+    this.name = "MpesaError";
+    this.kind = kind;
+    Object.assign(this, extra);
+  }
+}
+
+function assertEnv() {
+  const missing: string[] = [];
+  if (!CONSUMER_KEY) missing.push("MPESA_CONSUMER_KEY");
+  if (!CONSUMER_SECRET) missing.push("MPESA_CONSUMER_SECRET");
+  if (!PASSKEY) missing.push("MPESA_PASSKEY");
+  if (!SHORTCODE) missing.push("MPESA_SHORTCODE/PAYBILL");
+  if (!CALLBACK_URL) missing.push("MPESA_CALLBACK_URL");
+  if (missing.length) {
+    throw new MpesaError(`Missing env: ${missing.join(", ")}`, "env");
+  }
+}
+
+// ---------- OAuth token cache ----------
 let cachedToken: { token: string; exp: number } | null = null;
 
 async function getAccessToken(): Promise<string> {
-  if (!CONSUMER_KEY || !CONSUMER_SECRET) {
-    throw new Error("Daraja consumer key/secret missing in env");
-  }
+  assertEnv();
   if (cachedToken && cachedToken.exp - 30 > nowSec()) return cachedToken.token;
 
   const url = `${BASE}/oauth/v1/generate?grant_type=client_credentials`;
   const basic = Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString("base64");
 
-  const res = await withTimeout(
-    fetch(url, { method: "GET", headers: { Authorization: `Basic ${basic}` } } as any)
-  );
+  let res: Response;
+  try {
+    res = await withTimeout(
+      fetch(url, { method: "GET", headers: { Authorization: `Basic ${basic}`, "User-Agent": USER_AGENT } } as any),
+      TIMEOUT_MS
+    );
+  } catch (e: any) {
+    throw new MpesaError(`Token timeout: ${e?.message || e}`, "timeout");
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Daraja token error: ${res.status} ${text}`);
+    throw new MpesaError(`Token HTTP ${res.status}: ${text.slice(0, 300)}`, "auth", {
+      status: res.status,
+      body: text,
+    });
   }
 
   const data = (await res.json()) as { access_token: string; expires_in: string };
-  cachedToken = {
-    token: data.access_token,
-    exp: nowSec() + Number(data.expires_in || 3500),
-  };
+  if (!data?.access_token) {
+    throw new MpesaError("Token response missing access_token", "bad_response");
+  }
+  cachedToken = { token: data.access_token, exp: nowSec() + Number(data.expires_in || 3500) };
   return cachedToken.token;
 }
 
-// --- public helpers ------------------------------------------------------
+// ---------- Public helpers ----------
 export function toMSISDN(raw: string): string {
-  // Normalize KE numbers into 2547XXXXXXXX
   let s = (raw || "").trim();
-  if (!s) throw new Error("Empty phone number");
+  if (!s) throw new MpesaError("Empty phone number", "validation");
 
-  s = s.replace(/[^\d]/g, ""); // strip non-digits
+  s = s.replace(/[^\d+]/g, "");
 
-  if (s.startsWith("0")) s = "254" + s.slice(1);
+  if (s.startsWith("+254")) s = s.slice(1);
+  else if (s.startsWith("0")) s = "254" + s.slice(1);
   else if (s.startsWith("7")) s = "254" + s;
-  else if (s.startsWith("+254")) s = s.slice(1);
 
-  // At this point we want strictly 2547XXXXXXXX (12 digits)
   if (!/^2547\d{8}$/.test(s)) {
-    throw new Error(`Invalid KE MSISDN format: ${raw}`);
+    throw new MpesaError(`Invalid KE MSISDN: ${raw}`, "validation");
   }
   return s;
 }
 
-type STKPushOpts = {
-  amount: number;       // >= 1
-  phone: string;        // 2547XXXXXXXX
-  accountRef: string;   // e.g. Telegram ID or user id
-  description?: string; // shows in M-PESA push
+export type STKPushOpts = {
+  amount: number; // >= 1
+  phone: string; // 2547XXXXXXXX
+  accountRef: string; // user/telegram id
+  description?: string; // shows in M-PESA push (<= 40 chars)
 };
 
-type STKPushResp = {
+export type STKPushResp = {
   MerchantRequestID: string;
   CheckoutRequestID: string;
   ResponseCode: string;
@@ -128,13 +155,19 @@ type STKPushResp = {
   CustomerMessage: string;
 };
 
+function sanitizePayloadForLog(p: any) {
+  if (!DEBUG) return;
+  const clone = { ...(p || {}) };
+  if (clone.PhoneNumber) clone.PhoneNumber = "2547********";
+  console.log("[mpesa] payload:", JSON.stringify(clone));
+}
+
+// ---------- Core: STK Push ----------
 export async function stkPush(opts: STKPushOpts): Promise<STKPushResp> {
-  if (!PASSKEY) throw new Error("Daraja passkey missing in env");
-  if (!CALLBACK_URL) throw new Error("Daraja callback URL missing in env");
-  if (!SHORTCODE) throw new Error("Daraja shortcode missing in env");
+  assertEnv();
 
   const amount = Math.floor(Number(opts.amount));
-  if (!(amount >= 1)) throw new Error("Amount must be >= 1");
+  if (!(amount >= 1)) throw new MpesaError("Amount must be >= 1", "validation");
 
   const phone = toMSISDN(opts.phone);
   const token = await getAccessToken();
@@ -152,53 +185,67 @@ export async function stkPush(opts: STKPushOpts): Promise<STKPushResp> {
     PartyB: Number(SHORTCODE),
     PhoneNumber: phone,
     CallBackURL: CALLBACK_URL,
-    AccountReference: String(opts.accountRef).slice(0, 20), // Daraja UI truncates long refs
+    AccountReference: String(opts.accountRef).slice(0, 20),
     TransactionDesc: (opts.description || "BrainBot Plan").slice(0, 40),
   };
 
+  sanitizePayloadForLog(payload);
+
   const url = `${BASE}/mpesa/stkpush/v1/processrequest`;
 
-  // tiny retry wrapper for token expiry edge (401)
-  const doCall = async (): Promise<Response> => {
-    return withTimeout(
+  const attempt = async (bearer: string): Promise<Response> =>
+    withTimeout(
       fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${bearer}`,
           "Content-Type": "application/json",
+          "User-Agent": USER_AGENT,
+          ...(CALLBACK_SECRET ? { "X-Callback-Secret": CALLBACK_SECRET } : {}),
         },
         body: JSON.stringify(payload),
-      } as any)
+      } as any),
+      TIMEOUT_MS
     );
-  };
 
-  let res = await doCall();
+  let res: Response;
+  try {
+    res = await attempt(token);
+  } catch (e: any) {
+    throw new MpesaError(`STK timeout: ${e?.message || e}`, "timeout");
+  }
 
-  // If token randomly expired, refresh once and retry.
+  // If token expired, refresh once and retry with a small backoff
   if (res.status === 401) {
     cachedToken = null;
+    await sleep(200);
     const newToken = await getAccessToken();
-    res = await withTimeout(
-      fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${newToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      } as any)
-    );
+    try {
+      res = await attempt(newToken);
+    } catch (e: any) {
+      throw new MpesaError(`STK timeout (retry): ${e?.message || e}`, "timeout");
+    }
   }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`STK push failed: ${res.status} ${text}`);
+    // Daraja tends to return JSON like { errorCode, errorMessage }
+    let msg = text.slice(0, 400);
+    try {
+      const j = JSON.parse(text);
+      if (j?.errorMessage) msg = `${j.errorCode || res.status} ${j.errorMessage}`;
+    } catch {}
+    throw new MpesaError(`STK HTTP ${res.status}: ${msg}`, "http", { status: res.status, body: text });
   }
 
   const data = (await res.json()) as STKPushResp;
-  // Mild sanity check
-  if (!data.CheckoutRequestID) {
-    throw new Error(`STK push response missing CheckoutRequestID: ${JSON.stringify(data)}`);
+  if (!data?.CheckoutRequestID) {
+    throw new MpesaError(
+      `STK response missing CheckoutRequestID: ${JSON.stringify(data).slice(0, 400)}`,
+      "bad_response"
+    );
   }
+
+  if (DEBUG) console.log("[mpesa] response:", JSON.stringify(data));
   return data;
 }

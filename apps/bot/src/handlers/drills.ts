@@ -8,6 +8,9 @@ import { SUBJECTS } from "../subjects.js";
 import * as drillsRepo from "../repo/drillsRepo.js";
 import { startDrillLog, touchDrillLog, finishDrillLog } from "../repo/drillLogRepo.js";
 
+// NEW: syllabus topic resolver (safe even if syllabus is empty)
+import { resolveTopic } from "../lib/topic-resolver.js";
+
 /** Difficulty presets */
 const DIFF_MAP = {
   easy:   { questions: 5,  level: 0 },
@@ -107,10 +110,23 @@ export async function startDrill(ctx: Context, rawTopic: string, rawDiff?: strin
     if (sesLabel) subject = sesLabel;
   } catch { /* ignore */ }
 
+  // 🔎 Syllabus-aware topic resolution (works even if syllabus is empty)
+  const { canonical, suggestion } = resolveTopic(subject, topic);
+  if (!canonical) {
+    return ctx.replyWithHTML(
+      suggestion
+        ? `Topic not found. Did you mean <b>${escapeHtml(suggestion)}</b>?\n` +
+          `Try: <code>/drill ${escapeHtml(suggestion)}</code>`
+        : `Topic not in the syllabus for <b>${escapeHtml(subject)}</b>. ` +
+          `Try another topic or check spelling.`
+    );
+  }
+  const chosenTopic = canonical;
+
   const chosenStored = normalizeDifficulty(diffKey);
   const cfg = DIFF_MAP[chosenStored];
 
-  const drill = await getDrill(subject, topic, cfg.questions, cfg.level);
+  const drill = await getDrill(subject, chosenTopic, cfg.questions, cfg.level);
   const qs = (drill?.questions || []).map((q: any) => ({
     q: String(q?.q ?? q?.question ?? "").trim(),
     a: q?.a,
@@ -119,7 +135,7 @@ export async function startDrill(ctx: Context, rawTopic: string, rawDiff?: strin
   const saved = await drillsRepo.createDrill({
     telegramId: tgId,
     subjectLabel: subject,
-    topic,
+    topic: chosenTopic,
     difficulty: chosenStored,
     questions: qs,
     score: 0,
@@ -133,14 +149,14 @@ export async function startDrill(ctx: Context, rawTopic: string, rawDiff?: strin
       await startDrillLog({
         telegramId: tgId,
         subjectLabel: subject,
-        topic,
+        topic: chosenTopic,
         difficulty: chosenStored,
         outOf: qs.length,
       })
     );
   } catch {}
 
-  const body = renderDrillBody("📝 <b>Drill</b>", subject, topic, chosenStored, String((saved as any)?._id), qs);
+  const body = renderDrillBody("📝 <b>Drill</b>", subject, chosenTopic, chosenStored, String((saved as any)?._id), qs);
   await ctx.reply(body, {
     parse_mode: "HTML",
     reply_markup: {
@@ -154,7 +170,7 @@ export async function startDrill(ctx: Context, rawTopic: string, rawDiff?: strin
   });
 
   try {
-    const insight = await getOrGenerateInsight(subject, topic);
+    const insight = await getOrGenerateInsight(subject, chosenTopic);
     if (insight?.tips?.length) {
       const tips = insight.tips.map((t: string) => `• ${t}`).join("\n");
       await replyLong(ctx, `🔎 <b>Examiner Insight</b>\n${tips}`);
@@ -207,7 +223,11 @@ export function registerDrillHandlers(bot: Telegraf<Context>) {
       const prevCount = Array.isArray(prev.questions) ? prev.questions.length : 8;
       const diff = normalizeDifficulty((prev as any).difficulty);
 
-      const drill = await getDrill(subject, topic, prevCount, DIFF_MAP[diff].level);
+      // Re-run through topic resolver in case syllabus changed since last time
+      const { canonical, suggestion } = resolveTopic(subject, topic);
+      const chosenTopic = canonical ?? topic; // fallback to previous topic if not resolvable
+
+      const drill = await getDrill(subject, chosenTopic, prevCount, DIFF_MAP[diff].level);
       const qs = (drill?.questions || []).map((q: any) => ({
         q: String(q?.q ?? q?.question ?? "").trim(),
         a: q?.a,
@@ -216,14 +236,14 @@ export function registerDrillHandlers(bot: Telegraf<Context>) {
       const saved = await drillsRepo.createDrill({
         telegramId,
         subjectLabel: subject,
-        topic,
+        topic: chosenTopic,
         difficulty: diff,
         questions: qs,
         score: 0,
         outOf: qs.length,
       });
 
-      const body = renderDrillBody("🔁 <b>Drill Again</b>", subject, topic, diff, String((saved as any)?._id), qs);
+      const body = renderDrillBody("🔁 <b>Drill Again</b>", subject, chosenTopic, diff, String((saved as any)?._id), qs);
       await ctx.reply(body, {
         parse_mode: "HTML",
         reply_markup: {
@@ -288,7 +308,8 @@ export function registerDrillHandlers(bot: Telegraf<Context>) {
         return ctx.reply("Invalid answers. Use only 0/1 separated by commas, e.g. 1,0,1,1,0");
       }
 
-      const answers = csv.split(",").map((x) => Number(x));
+      
+      const answers = csv.split(",").map((x: string) => Number(x));
       const drill = await drillsRepo.getById(drillId);
       if (!drill) return ctx.reply("Drill not found. Generate a new one with /drill.");
 
@@ -297,7 +318,8 @@ export function registerDrillHandlers(bot: Telegraf<Context>) {
         return ctx.reply(`Expected ${outOf} answers, got ${answers.length}. Edit and resend.`);
       }
 
-      const score = answers.reduce((sum, x) => sum + (x === 1 ? 1 : 0), 0);
+      
+      const score = answers.reduce((sum: number, x: number) => sum + (x === 1 ? 1 : 0), 0);
       await drillsRepo.updateScore(drillId, score, outOf);
       try { await finishDrillLog(drillId, score); } catch {}
 

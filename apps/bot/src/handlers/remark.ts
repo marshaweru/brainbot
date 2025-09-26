@@ -5,7 +5,8 @@ import { savePerformance } from "../repo/performanceRepo.js";
 import { buildFeedbackMessage } from "../feedback/render.js";
 import { compileNotesForWeakTopics } from "../services/notes-service.js";
 import { SessionModel } from "../models/Session.js";
-import { fetchPdfBuffer } from "../pdf/export.js"; // uses WEB_PDF_ENDPOINT + SERVICE_TOKEN
+import { fetchPdfBufferFromFeedback } from "../pdf/export.js";
+ // uses WEB_PDF_ENDPOINT + SERVICE_TOKEN
 import { offerExportPdf } from "../services/pdf-export.js"; // keep as fallback
 
 /**
@@ -69,7 +70,7 @@ export function registerRemark(bot: Telegraf) {
           "-" +
           suffix;
 
-        const pdfBuffer = await fetchPdfBuffer(feedback, {
+        const pdfBuffer = await fetchPdfBufferFromFeedback (feedback, {
           downloadName: baseName,
           watermark: "BrainBot Africa",
         });

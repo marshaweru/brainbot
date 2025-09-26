@@ -1,105 +1,142 @@
 // apps/bot/src/repo/notesRepo.ts
-import { promises as fs } from "fs";
+// Null-safe notes repo with flexible fields (snippet | text | markdown).
+// If you already have a custom implementation, keep the types and the
+// subject handling pattern (no `null` assignments).
+
+import fs from "fs";
 import path from "path";
-import { SUBJECTS } from "../subjects.js";
-
-const NOTES_ROOT = path.resolve(__dirname, "..", "content", "notes");
-
-/** Normalize "Math / mathematics" → "mathematics" for folder names */
-function normalizeSubjectLabel(label?: string | null): string | null {
-  if (!label) return null;
-
-  const lower = String(label).toLowerCase();
-
-  // SUBJECTS can be strings or { slug, label }
-  const hit =
-    (SUBJECTS as any[]).find((s) => s?.slug?.toLowerCase?.() === lower) ??
-    (SUBJECTS as any[]).find((s) => s?.label?.toLowerCase?.() === lower) ??
-    (SUBJECTS as any[]).find((s) => String(s).toLowerCase() === lower);
-
-  if (!hit) return lower;
-  return (hit as any).slug || (hit as any).label || String(hit);
-}
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
-}
 
 export type NoteDoc = {
-  subject: string | null; // folder slug (e.g., "mathematics") or null if global
-  topic: string;          // human-friendly topic derived from filename
-  filename: string;       // absolute path to the file on disk
-  relpath: string;        // relative to NOTES_ROOT
-  markdown: string;       // file contents
+  topic: string;                // canonical topic (e.g., "Quadratic equations")
+  subject?: string;             // optional subject label (no nulls)
+  relpath?: string;             // where it came from (for hints)
+  markdown?: string;            // full content if loaded
+  text?: string;                // plain text (optional)
+  snippet?: string;             // teaser/preview (optional)
+  createdAt?: Date;
+  updatedAt?: Date;
 };
 
-async function readNoteFile(abs: string, subjectSlug: string | null): Promise<NoteDoc> {
-  const md = await fs.readFile(abs, "utf8");
-  const rel = path.relative(NOTES_ROOT, abs);
-  const base = path.basename(abs).replace(/\.md$/i, "");
-  const topic = base.replace(/^\d+[-_ ]*/, "").replace(/[_-]+/g, " ").trim();
-  return { subject: subjectSlug, topic, filename: abs, relpath: rel, markdown: md };
-}
+// ---- tiny utils ------------------------------------------------------------
 
-async function safeReaddir(dir: string): Promise<string[]> {
+const NOTES_DIRS = [
+  // Add any directories where your notes live (relative to repo root)
+  "apps/bot/src/content/notes",
+  "apps/bot/content/notes",
+  "content/notes",
+];
+
+function existingDir(p: string) {
   try {
-    return await fs.readdir(dir);
-  } catch {
-    return [];
-  }
+    return fs.existsSync(p) && fs.statSync(p).isDirectory();
+  } catch { return false; }
 }
 
-export async function getNotes(topic: string, subjectLabel?: string | null): Promise<NoteDoc[]> {
-  const q = topic?.trim();
-  if (!q) return [];
+function normalize(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
 
-  const subjectSlug = normalizeSubjectLabel(subjectLabel);
-  const topicSlug = slug(q);
-  const results: NoteDoc[] = [];
+function safeSnippet(s: string, max = 160) {
+  const cleaned = s.replace(/[_*`>#-]/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.length > max ? cleaned.slice(0, max - 1) + "…" : cleaned;
+}
 
-  const scanFolder = async (folder: string, subjSlug: string | null) => {
-    const entries = await safeReaddir(folder);
-    if (!entries.length) return;
+// ---- FS-backed fallback (subject → *.md under a folder) --------------------
+// Directory structure supported (examples):
+//   content/notes/Mathematics/Quadratic equations.md
+//   content/notes/Biology/Respiration.md
+//
+// If you already have a DB-backed index, swap this out and keep the types.
 
-    const mdFiles = entries.filter((f) => f.toLowerCase().endsWith(".md"));
+function listCandidateFiles(): string[] {
+  const cwd = process.cwd();
+  const roots = NOTES_DIRS
+    .map((d) => path.resolve(cwd, d))
+    .filter(existingDir);
 
-    // First pass: filename slug match (fast)
-    for (const file of mdFiles) {
-      if (file.toLowerCase().includes(topicSlug)) {
-        results.push(await readNoteFile(path.join(folder, file), subjSlug));
+  const files: string[] = [];
+  for (const root of roots) {
+    const walk = (dir: string) => {
+      for (const name of fs.readdirSync(dir)) {
+        const p = path.join(dir, name);
+        const st = fs.statSync(p);
+        if (st.isDirectory()) walk(p);
+        else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
       }
-    }
+    };
+    walk(root);
+  }
+  return files;
+}
 
-    // Second pass: content contains raw query (only if none found yet)
-    if (results.length === 0) {
-      const qLower = q.toLowerCase();
-      for (const file of mdFiles) {
-        const abs = path.join(folder, file);
-        const text = await fs.readFile(abs, "utf8").catch(() => "");
-        if (text && text.toLowerCase().includes(qLower)) {
-          results.push(await readNoteFile(abs, subjSlug));
-        }
-      }
-    }
-  };
+let FILE_CACHE: Array<{ abs: string; rel: string; subject?: string; topic: string }> | null = null;
 
-  // Prefer subject-specific folder when provided
-  if (subjectSlug) {
-    await scanFolder(path.join(NOTES_ROOT, subjectSlug), subjectSlug);
+function buildFileIndex() {
+  if (FILE_CACHE) return FILE_CACHE;
+  const cwd = process.cwd();
+  const files = listCandidateFiles();
+  FILE_CACHE = files.map((abs) => {
+    const rel = path.relative(cwd, abs);
+    const parts = rel.split(path.sep);
+    // crude heuristic: .../notes/<subject>/<topic>.md
+    const topic = path.basename(abs, path.extname(abs));
+    const notesIdx = parts.findIndex((p) => p.toLowerCase() === "notes");
+    const subject = notesIdx >= 0 && parts[notesIdx + 1] ? parts[notesIdx + 1] : undefined;
+    return { abs, rel, subject, topic };
+  });
+  return FILE_CACHE;
+}
+
+// ---- Public API ------------------------------------------------------------
+
+/**
+ * getNotes(topic, subject?)
+ * - Returns best-effort matches for a topic, optionally scoped to subject.
+ * - Never writes `null` into fields typed as `string | undefined`.
+ */
+export async function getNotes(topic: string, subjectLabel?: string): Promise<NoteDoc[]> {
+  const tNorm = normalize(topic);
+  const sNorm = subjectLabel ? normalize(subjectLabel) : undefined;
+
+  const idx = buildFileIndex();
+
+  // Filter candidates by subject (if provided)
+  const scoped = idx.filter((f) =>
+    sNorm ? normalize(f.subject ?? "") === sNorm : true
+  );
+
+  // Simple match: filename contains topic words
+  const words = tNorm.split(" ").filter(Boolean);
+  const candidates = scoped.filter((f) => {
+    const name = normalize(f.topic);
+    return words.every((w) => name.includes(w));
+  });
+
+  // Load a few matches (cap to 5)
+  const top = candidates.slice(0, 5);
+
+  const out: NoteDoc[] = [];
+  for (const f of top) {
+    try {
+      const markdown = fs.readFileSync(f.abs, "utf8");
+      out.push({
+        topic: f.topic,
+        ...(f.subject ? { subject: f.subject } : {}), // ✅ no nulls — only set when truthy
+        relpath: f.rel,
+        markdown,
+        snippet: safeSnippet(markdown),
+        createdAt: new Date(fs.statSync(f.abs).birthtimeMs || fs.statSync(f.abs).mtimeMs),
+        updatedAt: new Date(fs.statSync(f.abs).mtimeMs),
+      });
+    } catch {
+      // If file read fails, still return a pointer doc without content
+      out.push({
+        topic: f.topic,
+        ...(f.subject ? { subject: f.subject } : {}), // ✅ no nulls
+        relpath: f.rel,
+      });
+    }
   }
 
-  // If nothing yet, scan all subject folders (shallow)
-  if (results.length === 0) {
-    const subjects = await safeReaddir(NOTES_ROOT);
-    for (const subj of subjects) {
-      const full = path.join(NOTES_ROOT, subj);
-      const stat = await fs.stat(full).catch(() => null);
-      if (stat?.isDirectory()) {
-        await scanFolder(full, subj);
-        if (results.length) break;
-      }
-    }
-  }
-
-  return results;
+  return out;
 }

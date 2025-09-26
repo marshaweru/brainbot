@@ -2,44 +2,42 @@
   "name": "@brainbot/bot",
   "version": "1.0.0",
   "private": true,
-
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
-
   "packageManager": "pnpm@9.10.0",
-  "engines": { "node": ">=20.11.0" },
-
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "scripts": {
     "dev": "tsx watch --no-check src/index.ts",
-
-  
+    "enrich:insights": "tsx apps/bot/src/scripts/enrich-insights.ts",
     "build": "tsc",
-
-    
     "build:all": "pnpm --filter @brainbot/shared build && pnpm --filter @brainbot/bot build",
-
-    
     "prestart": "pnpm run build:all",
     "start": "node dist/index.js",
-
+    "prompt:lesson": "tsx src/scripts/prompt-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
-
   "dependencies": {
     "@brainbot/shared": "workspace:*",
     "axios": "^1.12.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.20.0",
     "mongoose": "^8.3.3",
     "puppeteer": "^24.20.0",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "zod": "^3.25.76"
   },
-
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.12.7",
+    "@types/handlebars": "^4.1.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.19.17",
     "@types/puppeteer": "^5.4.7",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",

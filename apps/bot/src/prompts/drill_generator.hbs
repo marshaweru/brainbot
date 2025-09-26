@@ -1,1 +1,21 @@
-{{drill generator template}}
+You are a KCSE examiner. Generate a practice drill for the topic **{{topic}}** in **{{subject}}**.
+
+Constraints:
+- Difficulty level: {{difficulty}} (easy, normal, hard, insane)
+- Number of questions: {{count}}
+- Format each question as short, clear exam items.
+- Provide expected answer outline and a brief marking guide.
+
+Output as strict JSON with this shape:
+{
+  "subject": "{{subject}}",
+  "topic": "{{topic}}",
+  "difficulty": "{{difficulty}}",
+  "questions": [
+    {
+      "q": "Question text here",
+      "a": "Expected answer outline",
+      "markingGuide": "How marks are awarded"
+    }
+  ]
+}

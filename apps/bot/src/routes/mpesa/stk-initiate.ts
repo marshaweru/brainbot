@@ -1,13 +1,15 @@
-import express, { Router } from "express";
+// apps/bot/src/routes/mpesa/stk-initiate.ts
+import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
+import crypto from "node:crypto";
 import { stkPush, toMSISDN } from "../../lib/mpesa.js";
 
 export const router = Router();
 
 /* ---------------- utils ---------------- */
 const jsonOnly = (req: Request, res: Response, next: NextFunction) => {
-  const ct = req.headers["content-type"] || "";
-  if (typeof ct === "string" && ct.includes("application/json")) return next();
+  const ct = (req.headers["content-type"] || "").toString().toLowerCase();
+  if (ct.includes("application/json")) return next();
   return res.status(415).json({ ok: false, error: "content-type must be application/json" });
 };
 
@@ -16,20 +18,53 @@ const bearerToken = (req: Request) => {
   return hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
 };
 
+const reqId = () =>
+  Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+
 /* ---------------- s2s auth (web → bot) ---------------- */
 function requireServiceAuth(req: Request, res: Response, next: NextFunction) {
-  const token = bearerToken(req);
   const expected = process.env.SERVICE_TOKEN || "";
-  if (!token || token !== expected) {
+  const token = bearerToken(req);
+  if (!expected || token !== expected) {
     res.setHeader('WWW-Authenticate', 'Bearer realm="brainbot", error="invalid_token"');
     return res.status(401).json({ ok: false, error: "unauthorized" });
   }
   next();
 }
 
+/* ---------------- optional HMAC signature (tamper check) ----------------
+   - If SERVICE_HMAC_SECRET is set, require X-BrainBot-Signature header.
+   - Signature = "sha256=" + hex( HMAC_SHA256(secret, rawBody) )
+   Make sure your Express app enables raw body for this route if you want
+   strict verification; otherwise we hash JSON.stringify(req.body).
+------------------------------------------------------------------------- */
+function verifySignature(secret: string, req: Request): boolean {
+  try {
+    const sent = (req.get("x-brainbot-signature") || "").trim();
+    if (!sent.startsWith("sha256=")) return false;
+    const raw =
+      (req as any).rawBody instanceof Buffer
+        ? (req as any).rawBody
+        : Buffer.from(JSON.stringify(req.body ?? {}));
+    const digest = crypto.createHmac("sha256", secret).update(raw).digest("hex");
+    const expected = `sha256=${digest}`;
+    // timing-safe compare
+    return crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+function requireOptionalHmac(req: Request, res: Response, next: NextFunction) {
+  const secret = process.env.SERVICE_HMAC_SECRET || "";
+  if (!secret) return next(); // feature off
+  if (verifySignature(secret, req)) return next();
+  return res.status(401).json({ ok: false, error: "bad signature" });
+}
+
 /* ---------------- MPESA env sanity ---------------- */
 function assertMpesaEnv() {
-  // Support both DARAJA_* and MPESA_* names
+  // Support both DARAJA_* and MPESA_*
   const key     = process.env.DARAJA_CONSUMER_KEY    ?? process.env.MPESA_CONSUMER_KEY;
   const secret  = process.env.DARAJA_CONSUMER_SECRET ?? process.env.MPESA_CONSUMER_SECRET;
   const shortCd = process.env.MPESA_SHORTCODE        ?? process.env.DARAJA_SHORTCODE;
@@ -73,20 +108,30 @@ function rateLimit(opts: { windowMs: number; maxPerIp: number; maxPerAccount: nu
 
   return (req: Request, res: Response, next: NextFunction) => {
     const now = Date.now();
-    const ip = (req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req.ip || "unknown");
+    const ip =
+      (req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+        req.ip ||
+        "unknown");
     const accountRef = typeof req.body?.accountRef === "string" ? req.body.accountRef : "";
 
     const ipRetry = take(ipBuckets, ip, maxPerIp, now);
     if (ipRetry > 0) {
       res.setHeader("Retry-After", String(ipRetry));
-      return res.status(429).json({ ok: false, error: `Too many requests from your IP. Try again in ${ipRetry}s.` });
+      return res
+        .status(429)
+        .json({ ok: false, error: `Too many requests from your IP. Try again in ${ipRetry}s.` });
     }
 
     if (accountRef) {
       const acctRetry = take(acctBuckets, accountRef, maxPerAccount, now);
       if (acctRetry > 0) {
         res.setHeader("Retry-After", String(acctRetry));
-        return res.status(429).json({ ok: false, error: `Too many requests for this account. Try again in ${acctRetry}s.` });
+        return res
+          .status(429)
+          .json({
+            ok: false,
+            error: `Too many requests for this account. Try again in ${acctRetry}s.`,
+          });
       }
     }
 
@@ -110,13 +155,53 @@ const ALLOWED_AMOUNTS = new Set([69, 499, 1499, 2999, 5999]); // KES
 
 function validateAmount(raw: unknown): number {
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) throw Object.assign(new Error("invalid amount"), { statusCode: 400 });
+  if (!Number.isFinite(n) || n <= 0)
+    throw Object.assign(new Error("invalid amount"), { statusCode: 400 });
   if (!ALLOWED_AMOUNTS.has(n)) {
-    const e: any = new Error(`amount not allowed; allowed: ${[...ALLOWED_AMOUNTS].join(", ")}`);
+    const e: any = new Error(
+      `amount not allowed; allowed: ${[...ALLOWED_AMOUNTS].join(", ")}`
+    );
     e.statusCode = 400;
     throw e;
   }
   return n;
+}
+
+/* ---------------- idempotency ---------------- */
+type Stamp = { at: number; resp: any };
+const IDEMP_TTL = 10 * 60_000; // 10 min
+const idem = new Map<string, Stamp>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of idem) if (now - v.at > IDEMP_TTL) idem.delete(k);
+}, 60_000).unref?.();
+
+/* ---------------- validation helpers ---------------- */
+type BodyIn = {
+  phone?: unknown;
+  amount?: unknown;
+  accountRef?: unknown;
+  description?: unknown;
+};
+
+function readBody(body: BodyIn) {
+  const phone = String(body?.phone ?? "").trim();
+  const amount = body?.amount;
+  const accountRef = String(body?.accountRef ?? "").trim();
+  const description =
+    body?.description == null ? undefined : String(body.description).slice(0, 160);
+
+  if (!phone || !amount || !accountRef) {
+    const e: any = new Error("phone, amount, accountRef required");
+    e.statusCode = 400;
+    throw e;
+  }
+
+  const msisdn = toMSISDN(phone);
+  const amt = validateAmount(amount);
+
+  return { msisdn, amt, accountRef, description };
 }
 
 /* ---------------- route ---------------- */
@@ -124,35 +209,48 @@ router.post(
   "/",
   jsonOnly,
   requireServiceAuth,
+  requireOptionalHmac, // requires SERVICE_HMAC_SECRET + X-BrainBot-Signature
   rateLimit({ windowMs: 60_000, maxPerIp: 5, maxPerAccount: 3 }),
   async (req: Request, res: Response) => {
+    const rid = reqId();
     try {
       assertMpesaEnv();
 
-      const { phone, amount, accountRef, description } = req.body ?? {};
-      if (!phone || !amount || !accountRef) {
-        return res.status(400).json({ ok: false, error: "phone, amount, accountRef required" });
+      const { msisdn, amt, accountRef, description } = readBody(req.body as BodyIn);
+
+      // Prefer client-supplied idempotency key (recommended for retries)
+      const headerKey = (req.get("Idempotency-Key") || "").trim().toLowerCase();
+      const ip = (req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req.ip || "unknown").toString();
+      // Composite fallback key: account + amount + phone (and ip to reduce collisions)
+      const fallbackKey = `${accountRef}:${amt}:${msisdn}:${ip}`;
+      const key = headerKey || fallbackKey;
+
+      // serve cached response if within TTL
+      const cached = idem.get(key);
+      if (cached && Date.now() - cached.at < IDEMP_TTL) {
+        return res.status(200).json({ ok: true, requestId: rid, cached: true, ...cached.resp });
       }
 
-      const msisdn = toMSISDN(String(phone));
-      const amt = validateAmount(amount);
-
-      const resp = await stkPush({
+      const mpesaResp = await stkPush({
         amount: amt,
         phone: msisdn,
-        accountRef: String(accountRef),
-        description: description ? String(description) : undefined
+        accountRef,
+        description,
       });
 
-      // { MerchantRequestID, CheckoutRequestID, ResponseCode, ResponseDescription, CustomerMessage }
-      return res.json({
+      const resp = {
         ok: true,
-        checkout: resp.CheckoutRequestID,
-        message: resp.CustomerMessage ?? "STK push sent"
-      });
+        requestId: rid,
+        checkout: mpesaResp.CheckoutRequestID,
+        message: mpesaResp.CustomerMessage ?? "STK push sent",
+      };
+
+      idem.set(key, { at: Date.now(), resp });
+      return res.json(resp);
     } catch (e: any) {
-      const status = e?.statusCode || 500;
-      return res.status(status).json({ ok: false, error: e?.message || "stk-initiate failed" });
+      const status = Number(e?.statusCode || 500);
+      const message = String(e?.message || "stk-initiate failed");
+      return res.status(status).json({ ok: false, error: message, requestId: rid });
     }
   }
 );

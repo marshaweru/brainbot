@@ -2,6 +2,7 @@
 import { Telegraf, Context, Markup } from "telegraf";
 import { buildPdfBuffer } from "../pdf/export.js";
 import { getLatestFeedbackByTelegramId } from "../repo/feedbackRepo.js";
+import { fetchPdfBufferFromFeedback, BRAND } from "../pdf/export.js";
 
 /**
  * Sends the user's latest examiner-style report as a PDF.
@@ -25,7 +26,8 @@ export function registerExportPdf(bot: Telegraf<Context>) {
       await ctx.reply("Generating your PDF…");
 
       // buildPdfBuffer should return Buffer | Uint8Array
-      const data = await buildPdfBuffer(fb);
+      const data = await fetchPdfBufferFromFeedback(fb, { brand: BRAND });
+
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
 
       const filename = `BrainBot-Feedback-${new Date()
@@ -59,7 +61,7 @@ export function registerExportPdf(bot: Telegraf<Context>) {
         return ctx.answerCbQuery("No recent session. Run /session first.");
       }
 
-      const data = await buildPdfBuffer(fb);
+      const data = await fetchPdfBufferFromFeedback(fb, { brand: BRAND });
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
 
       const filename = `BrainBot-Feedback-${new Date()

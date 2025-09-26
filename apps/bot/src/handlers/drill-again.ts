@@ -6,6 +6,9 @@ import * as sessionRepo from "../repo/sessionRepo.js";
 import * as drillsRepo from "../repo/drillsRepo.js";
 import { SUBJECTS } from "../subjects.js";
 
+// NEW: syllabus resolver
+import { resolveTopic } from "../lib/topic-resolver.js";
+
 const DIFF_MAP = {
   easy:   { questions: 5,  level: 0 },
   normal: { questions: 8,  level: 1 },
@@ -45,6 +48,12 @@ function normalizeStoredDifficulty(d: string | undefined): DiffKey {
   return "normal";
 }
 
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"]/g, (ch) =>
+    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : "&quot;"
+  );
+}
+
 export function registerDrillAgainHandler(bot: Telegraf) {
   // /drill_again [<topic>] [difficulty]
   bot.command("drill_again", async (ctx) => {
@@ -62,12 +71,11 @@ export function registerDrillAgainHandler(bot: Telegraf) {
         subject = normalizeSubjectLabel(active?.subjectLabel ?? null) || subject;
       } catch { /* ignore */ }
 
-      // If topic omitted, we’ll pull it from the latest drill for this subject
-      // Otherwise we’ll still use the latest *for that topic* to copy the shape (question count).
+      // If topic omitted, pull latest drill for this subject; else prefer latest for that topic.
       const latestForTopic = await drillsRepo.getLatestByTopic({
         telegramId,
         subjectLabel: subject,
-        topic: topicArg || "", // if "", this won’t match; we’ll fallback below
+        topic: topicArg || "",
       });
 
       let topic = topicArg;
@@ -76,13 +84,8 @@ export function registerDrillAgainHandler(bot: Telegraf) {
         ? normalizeStoredDifficulty(latestForTopic.difficulty as any)
         : undefined;
 
-      // If no topic provided *or* no latest for that topic, try latest drill for subject (any topic)
       if (!topic || baselineQuestions === 0) {
-        const recent = await drillsRepo.listRecent({
-          telegramId,
-          subjectLabel: subject,
-          limit: 1,
-        });
+        const recent = await drillsRepo.listRecent({ telegramId, subjectLabel: subject, limit: 1 });
         if (recent?.length) {
           const last = recent[0];
           if (!topic) topic = last.topic;
@@ -105,6 +108,19 @@ export function registerDrillAgainHandler(bot: Telegraf) {
         );
       }
 
+      // 🔎 Canonicalize the topic via syllabus (works even if syllabus is empty)
+      const { canonical, suggestion } = resolveTopic(subject, topic);
+      if (!canonical) {
+        return ctx.replyWithHTML(
+          suggestion
+            ? `Topic not found. Did you mean <b>${escapeHtml(suggestion)}</b>?\n` +
+              `Try: <code>/drill_again ${escapeHtml(suggestion)}</code>`
+            : `Topic not in the syllabus for <b>${escapeHtml(subject)}</b>. ` +
+              `Try another topic or check spelling.`
+        );
+      }
+      const chosenTopic = canonical;
+
       const difficulty: DiffKey = diffOverride || baselineDiff || "normal";
       const cfg = DIFF_MAP[difficulty];
 
@@ -118,14 +134,14 @@ export function registerDrillAgainHandler(bot: Telegraf) {
       const level = cfg.level;
 
       // Generate a fresh set with same shape (topic + Q count), new numbers
-      const drill = await getDrill(subject, topic, questionCount, level);
+      const drill = await getDrill(subject, chosenTopic, questionCount, level);
 
       // Persist the newly served drill
       const saved = await drillsRepo.createDrill({
         telegramId,
         subjectLabel: subject,
-        topic,
-        difficulty: difficulty === "medium" ? "medium" : (difficulty as any), // keep readable
+        topic: chosenTopic,
+        difficulty: difficulty === "medium" ? "medium" : (difficulty as any),
         questions: (drill.questions || []).map((q: any) => ({ q: String(q.q ?? q.question ?? ""), a: q.a })),
         score: 0,
         outOf: (drill.questions || []).length,
@@ -139,9 +155,9 @@ export function registerDrillAgainHandler(bot: Telegraf) {
       await ctx.reply(
         [
           `🔁 <b>Drill Again</b>`,
-          `Subject: <b>${subject}</b>`,
-          `Topic: <b>${topic}</b>`,
-          `Difficulty: <i>${difficulty}</i>`,
+          `Subject: <b>${escapeHtml(subject)}</b>`,
+          `Topic: <b>${escapeHtml(chosenTopic)}</b>`,
+          `Difficulty: <i>${escapeHtml(difficulty)}</i>`,
           `ID: <code>${(saved as any)._id}</code>`,
           ``,
           questions || "(No questions generated.)",
@@ -151,7 +167,7 @@ export function registerDrillAgainHandler(bot: Telegraf) {
 
       // Optional best-effort insights
       try {
-        const insight = await getOrGenerateInsight(subject, topic);
+        const insight = await getOrGenerateInsight(subject, chosenTopic);
         if (insight?.tips?.length) {
           const tips = insight.tips.map((t: string) => `• ${t}`).join("\n");
           await ctx.reply(`🔎 <b>Examiner Insight</b>\n${tips}`, { parse_mode: "HTML" });

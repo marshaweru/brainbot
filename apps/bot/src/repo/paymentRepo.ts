@@ -1,11 +1,8 @@
 // apps/bot/src/repo/paymentsRepo.ts
-// Minimal Mongo repo for M-PESA payments (idempotent inserts).
+// Minimal payments repo (idempotent inserts) using the existing Mongoose connection.
 
-import { MongoClient, Db, Collection } from "mongodb";
-
-const MONGO_URI = process.env.MONGODB_URI!;
-const DB_NAME = process.env.MONGODB_DB || "brainbot";
-let _db: Db | null = null;
+import mongoose from "mongoose";
+import { connectMongo } from "../db/mongo.js";
 
 type PaymentDoc = {
   _id?: string;
@@ -20,45 +17,40 @@ type PaymentDoc = {
   createdAt: Date;
 };
 
-async function db(): Promise<Db> {
-  if (_db) return _db;
-  const client = new MongoClient(MONGO_URI);
-  await client.connect();
-  _db = client.db(DB_NAME);
-  await ensureIndexes(_db);
-  return _db;
-}
+async function getColl() {
+  await connectMongo();
+  const db = mongoose.connection.db;
+  if (!db) throw new Error("Mongo not connected yet (mongoose.connection.db is undefined)");
+  const col = db.collection<PaymentDoc>("payments");
 
-async function ensureIndexes(d: Db) {
-  const col = d.collection<PaymentDoc>("payments");
-  // Unique when present. Mongo treats `null` as a value, so use partialFilterExpression.
-  await col.createIndex(
-    { checkoutId: 1 },
-    { unique: true, sparse: true, partialFilterExpression: { checkoutId: { $type: "string" } } }
-  );
-  await col.createIndex(
-    { receipt: 1 },
-    { unique: true, sparse: true, partialFilterExpression: { receipt: { $type: "string" } } }
-  );
-  await col.createIndex({ telegramId: 1, createdAt: -1 });
+  // Ensure indexes once (safe if they already exist)
+  await Promise.allSettled([
+    col.createIndex(
+      { checkoutId: 1 },
+      { unique: true, sparse: true, partialFilterExpression: { checkoutId: { $type: "string" } }, name: "uniq_checkoutId" }
+    ),
+    col.createIndex(
+      { receipt: 1 },
+      { unique: true, sparse: true, partialFilterExpression: { receipt: { $type: "string" } }, name: "uniq_receipt" }
+    ),
+    col.createIndex({ telegramId: 1, createdAt: -1 }, { name: "by_user_createdAt" }),
+  ]);
+
+  return col;
 }
 
 function parseTxnDateYYYYMMDDhhmmss(s?: string | number | null): Date | null {
   if (!s) return null;
   const str = String(s);
-  // Expect 14 digits: YYYYMMDDhhmmss (Daraja style)
-  if (!/^\d{14}$/.test(str)) return null;
+  if (!/^\d{14}$/.test(str)) return null; // YYYYMMDDhhmmss
   const y = Number(str.slice(0, 4));
-  const m = Number(str.slice(4, 6)) - 1; // JS month 0-based
+  const m = Number(str.slice(4, 6)) - 1;
   const d = Number(str.slice(6, 8));
   const hh = Number(str.slice(8, 10));
   const mm = Number(str.slice(10, 12));
   const ss = Number(str.slice(12, 14));
-  // Daraja timestamps are in Africa/Nairobi local time.
-  // Store as UTC by constructing a Date from the local components:
-  const dt = new Date(Date.UTC(y, m, d, hh, mm, ss));
-  // If you prefer to keep local, you could just return new Date(y, m, d, hh, mm, ss)
-  return dt;
+  // Treat as local Africa/Nairobi time but store UTC
+  return new Date(Date.UTC(y, m, d, hh, mm, ss));
 }
 
 export async function recordPaymentIfNew(p: {
@@ -71,8 +63,7 @@ export async function recordPaymentIfNew(p: {
   txDateRaw?: string | number | null;
   raw: any;
 }): Promise<{ created: boolean }> {
-  const d = await db();
-  const col = d.collection<PaymentDoc>("payments");
+  const col = await getColl();
 
   const txAt = parseTxnDateYYYYMMDDhhmmss(p.txDateRaw);
 
@@ -88,12 +79,11 @@ export async function recordPaymentIfNew(p: {
     createdAt: new Date(),
   };
 
-  // Idempotency: try insert; if duplicate key on receipt or checkoutId → treat as already processed
   try {
     await col.insertOne(doc);
     return { created: true };
   } catch (e: any) {
-    // 11000 = duplicate key
+    // 11000 = duplicate key (checkoutId or receipt)
     if (e?.code === 11000) return { created: false };
     throw e;
   }

@@ -6,6 +6,10 @@ import { resolvePaperContent } from "../repo/papersRepo.js";
 import { SessionModel } from "../models/Session.js";
 import { startSessionTimer, resolveExamPreset } from "../services/timer.js";
 
+// NEW imports
+import { getUserPlan } from "../repo/planRepo.js";
+import { createSession } from "../repo/sessionRepo.js";
+
 const escHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -13,6 +17,22 @@ const escHtml = (s: string) =>
 function subjectLabelAt(index: number): string {
   const item = SUBJECTS[index] as any;
   return (item?.label as string) || String(item);
+}
+
+// --- exam preset normalization ---
+type ExamPreset = "2h" | "2h30";
+
+/** Normalize any legacy/input value to our enum */
+function normalizeExamPreset(v: string | number | null | undefined): ExamPreset {
+  const s = String(v ?? "2").trim().toLowerCase().replace(/\s+/g, "");
+  if (s === "2.5" || s === "2h30" || s === "150" || s === "150m" || s === "2.5h" || s === "2hr30min") {
+    return "2h30";
+  }
+  return "2h";
+}
+
+function presetHours(p: ExamPreset): number {
+  return p === "2h30" ? 2.5 : 2;
 }
 
 export function registerSessionStart(bot: Telegraf) {
@@ -38,7 +58,7 @@ export function registerSessionStart(bot: Telegraf) {
       { $set: { active: false } }
     );
 
-    // Create a fresh session in "awaiting-subject" mode
+    // Create a lightweight chooser row
     await SessionModel.create({
       telegramId,
       active: true,
@@ -82,15 +102,15 @@ export function registerSessionStart(bot: Telegraf) {
 
     const telegramId = String(ctx.from?.id ?? "");
 
-    // Make sure we are choosing a subject for a pending session
-    const session = await SessionModel.findOne({
+    // Ensure we are choosing a subject for a pending session
+    const shell = await SessionModel.findOne({
       telegramId,
       active: true,
       expiresAt: { $gt: new Date() },
     });
 
-    if (!session) return; // no active shell; ignore stray numbers
-    if (session.mode !== "awaiting-subject") {
+    if (!shell) return; // no active shell; ignore stray numbers
+    if (shell.mode !== "awaiting-subject") {
       return ctx.reply("You already started a session. Send your answers, then type /finish.");
     }
 
@@ -102,24 +122,35 @@ export function registerSessionStart(bot: Telegraf) {
       return ctx.reply("No paper available for that subject yet. Try another subject.");
     }
 
-    // Normalize paper number field (supports either .paper or .paperNumber)
     const paperNum: 1 | 2 | 3 = Number(
       (paper as any).paper ?? (paper as any).paperNumber ?? 1
     ) as 1 | 2 | 3;
 
-    // Update session → in-progress + subject + paper
-    session.mode = "in-progress";
-    (session as any).subjectIndex = n - 1;
-    (session as any).subjectLabel = subjectLabel;
-    (session as any).paper = paperNum;
+    // Decide exam preset and normalize
+    const rawPreset = resolveExamPreset(subjectLabel, paperNum);
+    const preset: ExamPreset = normalizeExamPreset(rawPreset);
+    const paperHours = presetHours(preset);
 
-    // Decide exam preset (2h or 2h30), then start timer (also sets examEndsAt/uploadEndsAt/expiresAt)
-    const preset = resolveExamPreset(subjectLabel, paperNum);
-    (session as any).examPreset = preset;
-    await session.save();
+    // Fetch current plan tier
+    const plan = await getUserPlan(telegramId);
 
-    // Kick off the timer (halfway + 10m exam, then 30m upload window pings)
-    await startSessionTimer(ctx, String(session._id), { subjectLabel, paper: paperNum, preset });
+    // Create the real session
+    const created = await createSession({
+      telegramId,
+      subjectIndex: n - 1,
+      subjectLabel,
+      paper: paperNum,
+      tier: plan.tier,
+      paperHours,
+      examPreset: preset,
+    });
+
+    // Kick off the timer
+    await startSessionTimer(ctx, String((created as any)._id ?? ""), {
+      subjectLabel,
+      paper: paperNum,
+      preset,
+    });
 
     // Deliver the paper
     const r = resolvePaperContent(paper as any);
@@ -128,20 +159,35 @@ export function registerSessionStart(bot: Telegraf) {
     if (r.kind === "pdf") {
       await ctx.replyWithDocument({ source: r.filePath }, { caption });
     } else {
-      // AI-set placeholder; upgrade later to render items
       await ctx.replyWithHTML(
         `📘 <b>${escHtml(subjectLabel)}</b> AI-set available. (Rendering inline text/quiz in future versions)`
       );
     }
 
     // UX guidance with timing hints
-    const timingLine =
-      preset === "2h30"
-        ? "⏱ Exam window: 2h 30m + 30m upload buffer."
-        : "⏱ Exam window: 2h + 30m upload buffer.";
+    const totalWindow =
+      plan.tier === "free"
+        ? Math.min(paperHours + 1, 3.5)
+        : plan.tier === "lite" || plan.tier === "steady"
+        ? 4
+        : plan.tier === "elite"
+        ? 24
+        : 6;
+
+    const examLine = paperHours === 2.5 ? "⏱ Exam window: 2h 30m" : "⏱ Exam window: 2h";
+
+    const extraLine =
+      plan.tier === "free"
+        ? `+ ${Math.max(0, totalWindow - paperHours)}h upload/mark buffer (capped at 3.5h total)`
+        : plan.tier === "lite" || plan.tier === "steady"
+        ? `→ Total window: 4h`
+        : plan.tier === "elite"
+        ? `→ Total window: 24h`
+        : `→ Total window: 6h`;
 
     await ctx.replyWithHTML(
-      `✅ <b>${escHtml(subjectLabel)}</b> paper assigned (Paper ${paperNum}).\n${timingLine}\n\n` +
+      `✅ <b>${escHtml(subjectLabel)}</b> paper assigned (Paper ${paperNum}).\n` +
+        `${examLine} • ${extraLine}\n\n` +
         `Send your answers now:\n• Photos\n• PDFs\n• Voice notes\n• Text\n\n` +
         `When done, type <code>/finish</code>.`
     );
