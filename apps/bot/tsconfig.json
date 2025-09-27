@@ -21,6 +21,11 @@
     "composite": false,
     "sourceMap": false
   },
+
+  "references": [
+    { "path": "../../packages/shared" }
+  ],
+
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "src/pdf/**"]
 }

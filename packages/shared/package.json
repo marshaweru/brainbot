@@ -2,38 +2,17 @@
   "name": "@brainbot/shared",
   "version": "1.0.0",
   "private": true,
-
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./db": {
-      "types": "./dist/db/index.d.ts",
-      "default": "./dist/db/index.js"
-    }
+    ".":  { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./db": { "types": "./dist/db/index.d.ts", "import": "./dist/db/index.js" }
   },
-
   "files": ["dist"],
   "sideEffects": false,
-
-  "scripts": {
-    "clean": "rimraf dist",
-    "build": "rimraf dist && tsc -p tsconfig.json"
-  },
-
-  "peerDependencies": {
-    "mongodb": "^6.8.0"
-  },
-  "devDependencies": {
-    "rimraf": "^5.0.0",
-    "typescript": "^5.9.2",
-    "mongodb": "6.8.0"
-  },
-
+  "scripts": { "clean": "rimraf dist", "build": "tsc -b" },
+  "peerDependencies": { "mongodb": "^6.8.0" },
+  "devDependencies": { "typescript": "^5.9.2", "rimraf": "^5.0.0", "mongodb": "6.8.0" },
   "engines": { "node": ">=20" }
 }

@@ -7,13 +7,14 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "noEmit": false,                 // ⬅️ force emit
     "noEmitOnError": true,
 
     "target": "ES2022",
     "lib": ["ES2022"],
-    "module": "NodeNext",              // was ESNext
-    "moduleResolution": "NodeNext",    // was Bundler
-    "verbatimModuleSyntax": true,      // keep import/export as-is
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
     "strict": true,
     "skipLibCheck": true

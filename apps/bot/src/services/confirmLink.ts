@@ -3,13 +3,14 @@ import crypto from "node:crypto";
 
 const WEB_API = (process.env.WEB_API_BASE || "").replace(/\/+$/, "");
 const SECRET = process.env.SESSION_WEBHOOK_SECRET || "";
+const SERVICE_TOKEN = process.env.SERVICE_TOKEN || "";
 
 export type ConfirmResp = {
   ok: boolean;
   already?: boolean;
   wid?: string;
   plan?: string;
-  telegramId?: string;   // 🔄 string, not number
+  telegramId?: string;  // keep string
   error?: string;
 };
 
@@ -23,25 +24,30 @@ export async function confirmLinkOnWeb(token: string, telegramId: string): Promi
   try {
     const t = token.startsWith("st_") ? token.slice(3) : token;
 
-    // If WEB_API is set, call the web endpoint with HMAC
     if (WEB_API) {
       const body = JSON.stringify({ token, telegramId });
-      const sig = SECRET ? crypto.createHmac("sha256", SECRET).update(body).digest("hex") : "";
+      const sig = SECRET ? crypto.createHmac("sha256", SECRET).update(body, "utf8").digest("hex") : "";
+
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), 12000);
+
       const res = await fetch(`${WEB_API}/api/link/confirm`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(SERVICE_TOKEN ? { Authorization: `Bearer ${SERVICE_TOKEN}` } : {}),
           ...(SECRET ? { "x-brainbot-signature": sig } : {}),
         },
         body,
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(id));
 
       if (!res.ok) {
         const txt = await res.text();
         return { ok: false, error: `HTTP ${res.status}: ${txt.slice(0, 200)}` };
       }
 
-      // Try parse JSON, fall back to text error
+      // Prefer JSON response; if not, return a readable error
       try {
         const j = (await res.json()) as ConfirmResp;
         return j;
@@ -51,7 +57,7 @@ export async function confirmLinkOnWeb(token: string, telegramId: string): Promi
       }
     }
 
-    // Fallback: decode locally (works even without WEB_API)
+    // Fallback: local decode (only if WEB_API is unset)
     const parsed = JSON.parse(b64urlToStr(t)) as { wid?: string; plan?: string };
     if (!parsed?.wid) return { ok: false, error: "Missing wid" };
     return { ok: true, wid: String(parsed.wid), plan: String(parsed.plan || "free"), telegramId };
