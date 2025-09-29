@@ -1,24 +1,18 @@
 services:
-  - type: web
+  - type: worker
     name: brainbot-bot
-    env: node
-    rootDir: .
-    buildCommand: |
-      bash -lc '
-      set -euxo pipefail
-      corepack enable
-      corepack prepare pnpm@9.10.0 --activate
-      pnpm install --frozen-lockfile
-      pnpm -F @brainbot/shared build
-      pnpm -F @brainbot/bot build
-      '
-    startCommand: pnpm -F @brainbot/bot start
-    healthCheckPath: /healthz
+    env: docker
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: NODE_VERSION
-        value: 20
-      - key: BOT_MODE
-        value: polling
+      - key: NODE_ENV
+        value: production
+      - key: WEB_API_BASE
+        value: https://<your-web>.onrender.com
+      - key: SERVICE_TOKEN
+        sync: false
+      - key: SESSION_WEBHOOK_SECRET
+        sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: MONGODB_DB
         value: brainbot
-      # add TELEGRAM_BOT_TOKEN, MONGODB_URI in the dashboard or here
