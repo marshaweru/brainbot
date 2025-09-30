@@ -3,6 +3,7 @@ services:
     name: brainbot-bot
     env: docker
     dockerfilePath: ./Dockerfile
+    plan: starter
     envVars:
       - key: NODE_ENV
         value: production
